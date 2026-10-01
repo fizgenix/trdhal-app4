@@ -1,0 +1,132 @@
+/**
+ * Hand-written reference types matching supabase/migrations/0001_init.sql.
+ *
+ * These aren't wired into the Supabase client as a strict generic (joined
+ * queries like `sites ( name )` make hand-maintained generics brittle and
+ * error-prone to keep in sync). Once the project is connected to a real
+ * Supabase instance, prefer regenerating this file with:
+ *
+ *   npx supabase gen types typescript --project-id <your-project-ref> > src/types/database.ts
+ *
+ * and then wiring `createClient<Database>()` in lib/supabase/*.ts.
+ */
+
+export type SiteRole = "ho1_ordering" | "ho2_receiving" | "ho3_accounts";
+export type OrderStatus =
+  | "placed"
+  | "pending_approval"
+  | "completed"
+  | "cancelled";
+
+export type Profile = {
+  id: string;
+  full_name: string;
+  email: string | null;
+  phone: string | null;
+  is_admin: boolean;
+  is_active: boolean;
+  created_at: string;
+};
+
+export type Site = {
+  id: string;
+  name: string;
+  location: string | null;
+  created_at: string;
+};
+
+export type UserSite = {
+  id: string;
+  user_id: string;
+  site_id: string;
+  role: SiteRole;
+  created_at: string;
+};
+
+export type Item = {
+  id: string;
+  name: string;
+  unit: string;
+  created_by: string | null;
+  created_at: string;
+};
+
+export type Shopkeeper = {
+  id: string;
+  name: string;
+  phone: string | null;
+  created_by: string | null;
+  created_at: string;
+};
+
+export type Building = {
+  id: string;
+  site_id: string;
+  name: string;
+  created_by: string | null;
+  created_at: string;
+};
+
+export type Order = {
+  id: string;
+  site_id: string;
+  item_id: string;
+  quantity_ordered: number;
+  shopkeeper_id: string;
+  placed_by: string;
+  placed_date: string;
+  status: OrderStatus;
+  /** Auto-assigned at insert time (see supabase/migrations/0007_po_invoice_numbers.sql) — never set by the app. */
+  po_number: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type OrderEditLog = {
+  id: string;
+  order_id: string;
+  edited_by: string;
+  edited_at: string;
+  action: "edited" | "cancelled";
+  note: string | null;
+  previous_values: Record<string, unknown> | null;
+};
+
+export type ReceivingLog = {
+  id: string;
+  order_id: string;
+  quantity_received: number;
+  condition_notes: string | null;
+  /** Entered by HO2 when logging the delivery — null only on rows logged before this field existed. */
+  invoice_number: string | null;
+  received_by: string;
+  received_date: string;
+  created_at: string;
+};
+
+export type Approval = {
+  id: string;
+  order_id: string;
+  approved_by: string;
+  approved_date: string;
+  remarks: string | null;
+  created_at: string;
+};
+
+export type InventoryRelease = {
+  id: string;
+  site_id: string;
+  item_id: string;
+  quantity_released: number;
+  quality_notes: string | null;
+  destination_building_id: string;
+  released_by: string;
+  released_date: string;
+  created_at: string;
+};
+
+export type SiteInventoryRow = {
+  site_id: string;
+  item_id: string;
+  quantity_available: number;
+};

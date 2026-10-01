@@ -1,0 +1,39 @@
+@import "tailwindcss";
+
+:root {
+  --background: #f6f4ef;
+  --foreground: #1c2333;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans:
+    ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+
+  /* TR Dhal brand palette: deep navy chrome + warm gold accent, on a
+     warm cream canvas — matches the "Final Screens v3" design file. */
+  --color-brand-navy: #0f1a33;
+  --color-brand-navy-2: #1a2b4d;
+  --color-brand-gold: #d4a017;
+  --color-brand-gold-light: #f2c94c;
+  --color-brand-gold-pale: #e9c96a;
+  --color-brand-gold-border: #c9a227;
+  --color-brand-gold-text: #f3d98a;
+  --color-brand-cream: #faf8f3;
+  --color-brand-content: #f6f4ef;
+  --color-brand-border: #c4bba8;
+  --color-brand-border-soft: #ddd5c4;
+  --color-brand-input-border: #b9b09b;
+
+  /* Status badge colors per spec: Placed = yellow, Pending Approval = orange, Completed = green */
+  --color-status-placed: #eab308;
+  --color-status-pending: #f97316;
+  --color-status-completed: #22c55e;
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans);
+}
