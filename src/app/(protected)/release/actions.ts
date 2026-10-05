@@ -4,12 +4,15 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { requireUser } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
+import { normalizeName } from "@/lib/fuzzy";
+import { flashToast } from "@/lib/toast";
 
 export type ReleaseFormState = { error: string | null; success: string | null };
 
 const releaseSchema = z.object({
   siteId: z.string().uuid(),
-  itemId: z.string().uuid(),
+  itemId: z.string().uuid("Choose an item to release."),
+  unit: z.string().trim().min(1, "Choose an item to release."),
   quantityReleased: z.coerce.number().positive("Enter a quantity greater than zero."),
   destinationBuildingId: z.string().min(1),
   newBuildingName: z.string().trim(),
@@ -31,6 +34,7 @@ export async function releaseInventory(
   const parsed = releaseSchema.safeParse({
     siteId: formData.get("site_id"),
     itemId: formData.get("item_id"),
+    unit: formData.get("unit") ?? "",
     quantityReleased: formData.get("quantity_released"),
     destinationBuildingId: formData.get("destination_building_id"),
     newBuildingName: formData.get("new_building_name") ?? "",
@@ -59,10 +63,24 @@ export async function releaseInventory(
   const supabase = await createClient();
 
   let destinationBuildingId = data.destinationBuildingId;
+  if (destinationBuildingId === "__new__" && !data.newBuildingName) {
+    return { error: "Enter a name for the new building.", success: null };
+  }
+
+  // A "new" building whose name only differs from one already at this site
+  // by case, spacing or punctuation reuses it instead of duplicating it.
   if (destinationBuildingId === "__new__") {
-    if (!data.newBuildingName) {
-      return { error: "Enter a name for the new building.", success: null };
-    }
+    const { data: siteBuildings } = await supabase
+      .from("buildings")
+      .select("id, name")
+      .eq("site_id", data.siteId);
+    const match = (siteBuildings ?? []).find(
+      (b) => normalizeName(b.name) === normalizeName(data.newBuildingName),
+    );
+    if (match) destinationBuildingId = match.id;
+  }
+
+  if (destinationBuildingId === "__new__") {
     const { data: newBuilding, error: buildingError } = await supabase
       .from("buildings")
       .insert({ site_id: data.siteId, name: data.newBuildingName, created_by: user.id })
@@ -80,6 +98,7 @@ export async function releaseInventory(
   const { error } = await supabase.rpc("release_inventory", {
     p_site_id: data.siteId,
     p_item_id: data.itemId,
+    p_unit: data.unit,
     p_quantity_released: data.quantityReleased,
     p_quality_notes: data.qualityNotes || null,
     p_destination_building_id: destinationBuildingId,
@@ -90,5 +109,6 @@ export async function releaseInventory(
   }
 
   revalidatePath("/release");
+  await flashToast("Inventory released.");
   return { error: null, success: "Inventory released." };
 }

@@ -2,6 +2,7 @@
 
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { flashToast } from "@/lib/toast";
 
 export type LoginState = { error: string | null };
 
@@ -23,5 +24,6 @@ export async function signIn(
     return { error: "Login failed. Check your email and password and try again." };
   }
 
+  await flashToast("Signed in successfully.");
   redirect("/dashboard");
 }

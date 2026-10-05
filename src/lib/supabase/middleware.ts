@@ -29,8 +29,11 @@ export async function updateSession(request: NextRequest) {
     },
   );
 
-  // Touching getUser() is what actually refreshes an expired session.
-  await supabase.auth.getUser();
+  // Touching the session is what actually refreshes an expired one.
+  // getClaims() does that too, but verifies the JWT locally (with
+  // asymmetric signing keys) instead of calling the Auth server on every
+  // request the way getUser() does.
+  await supabase.auth.getClaims();
 
   return supabaseResponse;
 }

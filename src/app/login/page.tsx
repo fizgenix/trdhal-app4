@@ -53,7 +53,7 @@ export default function LoginPage() {
               </p>
             )}
 
-            <Button type="submit" fullWidth disabled={isPending}>
+            <Button type="submit" fullWidth loading={isPending}>
               {isPending ? "Signing in…" : "Sign in"}
             </Button>
           </form>

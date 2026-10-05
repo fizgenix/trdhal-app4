@@ -12,8 +12,8 @@ What's here:
   with a role (Ordering / Receiving / Accounts)
 - A dashboard showing each user their assigned site(s), linking into
   Orders for that site
-- **Orders**: HO1 (or Admin) places an order — item, quantity, shopkeeper —
-  at their site, with Item and Shopkeeper as type-to-search fields with an
+- **Orders**: HO1 (or Admin) places an order — item, quantity, vendor —
+  at their site, with Item and Vendor as type-to-search fields with an
   inline "+ Add new…" option, so a first-time material or supplier doesn't
   need a separate trip to a master-data screen. Every order gets a
   **PO Number** auto-assigned at placement (shown on the form before you
@@ -24,10 +24,10 @@ What's here:
   edit the quantity or cancel it, but only while it's still in the
   `Placed` state — every edit/cancel is logged and shown under a
   "History" disclosure on the order, and stays visible even if you later
-  can't edit it. A search box filters the list by item or shopkeeper name.
+  can't edit it. A search box filters the list by item or vendor name.
 - **Receiving**: HO2 (or Admin) sees a site's open orders (`Placed` or
   `Pending Approval`) and logs a delivery against one — quantity, date,
-  **invoice number** (required — the shopkeeper's own invoice reference),
+  **invoice number** (required — the vendor's own invoice reference),
   optional condition/quality notes. Multiple entries per order are fine
   (partial deliveries); the first entry on an order automatically moves it
   from `Placed` to `Pending Approval`. Receiving entries are append-only —
@@ -47,7 +47,7 @@ What's here:
 - **Inventory Release**: HO2 (or Admin) sees current stock at their site
   (received minus already released, per item) and releases some of it to
   a building — quantity, destination (dropdown with inline "+ Add a new
-  building…", same pattern as items/shopkeepers), optional quality notes.
+  building…", same pattern as items/vendors), optional quality notes.
   The item dropdown only offers items actually in stock, and a release is
   hard-stopped at whatever's currently available — you can't release more
   than the site has, per your answer on that. A running "Recent releases"

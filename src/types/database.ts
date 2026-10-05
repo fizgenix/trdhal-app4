@@ -46,6 +46,7 @@ export type UserSite = {
 export type Item = {
   id: string;
   name: string;
+  /** The item's usual unit — pre-filled on new orders; each order carries its own (Order.unit). */
   unit: string;
   created_by: string | null;
   created_at: string;
@@ -72,11 +73,13 @@ export type Order = {
   site_id: string;
   item_id: string;
   quantity_ordered: number;
+  /** Fixed when the order is placed; its receiving and approval stay in this unit (0011_unit_per_order.sql). */
+  unit: string;
   shopkeeper_id: string;
   placed_by: string;
   placed_date: string;
   status: OrderStatus;
-  /** Auto-assigned at insert time (see supabase/migrations/0007_po_invoice_numbers.sql) — never set by the app. */
+  /** Entered manually by HO1 when placing the order (0008_manual_po_number.sql). */
   po_number: string;
   created_at: string;
   updated_at: string;
@@ -117,6 +120,8 @@ export type InventoryRelease = {
   id: string;
   site_id: string;
   item_id: string;
+  /** Which stock line (item + unit) this came out of. */
+  unit: string;
   quantity_released: number;
   quality_notes: string | null;
   destination_building_id: string;
@@ -125,8 +130,10 @@ export type InventoryRelease = {
   created_at: string;
 };
 
+/** Stock per site, item *and* unit — the same item in two units is two rows. */
 export type SiteInventoryRow = {
   site_id: string;
   item_id: string;
+  unit: string;
   quantity_available: number;
 };

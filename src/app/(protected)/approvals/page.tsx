@@ -1,6 +1,7 @@
 import { requireUser } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { SiteSwitcher } from "@/components/SiteSwitcher";
+import { resolveSelectedSiteId } from "@/lib/selected-site";
 import { StatusBadge } from "@/components/StatusBadge";
 import { ApproveOrderForm } from "./ApproveOrderForm";
 import type { OrderStatus } from "@/types/database";
@@ -13,7 +14,9 @@ type PendingOrderRow = {
   quantity_ordered: number;
   status: OrderStatus;
   placed_date: string;
-  items: Rel<{ name: string; unit: string }>;
+  /** The order's own unit — receiving and approval stay in it. */
+  unit: string;
+  items: Rel<{ name: string }>;
   shopkeepers: Rel<{ name: string }>;
   profiles: Rel<{ full_name: string }>;
 };
@@ -69,8 +72,7 @@ export default async function ApprovalsPage({
     );
   }
 
-  const selectedSiteId =
-    siteParam && sites.some((s) => s.id === siteParam) ? siteParam : sites[0].id;
+  const selectedSiteId = await resolveSelectedSiteId(sites, siteParam);
 
   const canApproveHere =
     user.isAdmin ||
@@ -81,7 +83,7 @@ export default async function ApprovalsPage({
   const { data: ordersData } = await supabase
     .from("orders")
     .select(
-      "id, po_number, quantity_ordered, status, placed_date, items ( name, unit ), shopkeepers ( name ), profiles ( full_name )",
+      "id, po_number, quantity_ordered, unit, status, placed_date, items ( name ), shopkeepers ( name ), profiles ( full_name )",
     )
     .eq("site_id", selectedSiteId)
     .eq("status", "pending_approval")
@@ -158,7 +160,7 @@ export default async function ApprovalsPage({
                     <p className="text-base font-bold text-brand-navy">
                       {item?.name ?? "Unknown item"}{" "}
                       <span className="text-xs font-normal text-[#7b8494]">
-                        ({item?.unit})
+                        ({order.unit})
                       </span>
                     </p>
                     <span className="rounded-full border border-brand-border bg-brand-cream px-2 py-0.5 font-mono text-[11px] font-bold text-brand-navy">
@@ -166,8 +168,8 @@ export default async function ApprovalsPage({
                     </span>
                   </div>
                   <p className="mt-0.5 text-xs text-[#6b7280]">
-                    Ordered: {order.quantity_ordered} {item?.unit} · Received:{" "}
-                    {receivedTotal} {item?.unit} · Shopkeeper: {shopkeeper?.name ?? "—"}
+                    Ordered: {order.quantity_ordered} {order.unit} · Received:{" "}
+                    {receivedTotal} {order.unit} · Vendor: {shopkeeper?.name ?? "—"}
                   </p>
                   <p className="mt-0.5 text-[11px] text-[#7b8494]">
                     Placed by {placedByProfile?.full_name ?? "Unknown"} on{" "}
@@ -205,7 +207,7 @@ export default async function ApprovalsPage({
                       const receiver = one(log.profiles);
                       return (
                         <li key={log.id}>
-                          {log.quantity_received} {item?.unit} on {formatDate(log.received_date)}{" "}
+                          {log.quantity_received} {order.unit} on {formatDate(log.received_date)}{" "}
                           — logged by {receiver?.full_name ?? "Unknown"}
                           {log.invoice_number && (
                             <span className="text-[#7b8494]"> · Invoice {log.invoice_number}</span>
@@ -226,7 +228,7 @@ export default async function ApprovalsPage({
                 ) : (
                   <p className="mt-4 rounded-lg bg-orange-50 px-4 py-3 text-sm font-medium text-orange-800">
                     Waiting on the full quantity before this can be approved — {receivedTotal}{" "}
-                    of {order.quantity_ordered} {item?.unit} received so far.
+                    of {order.quantity_ordered} {order.unit} received so far.
                   </p>
                 ))}
             </div>

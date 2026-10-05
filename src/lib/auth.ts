@@ -1,3 +1,4 @@
+import { cache } from "react";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 
@@ -5,7 +6,7 @@ export type SiteRole = "ho1_ordering" | "ho2_receiving" | "ho3_accounts";
 
 export const SITE_ROLE_LABELS: Record<SiteRole, string> = {
   ho1_ordering: "Ordering (HO1)",
-  ho2_receiving: "Receiving / Shopkeeper (HO2)",
+  ho2_receiving: "Receiving / Vendor (HO2)",
   ho3_accounts: "Accounts / Approval (HO3)",
 };
 
@@ -39,27 +40,33 @@ function siteName(sites: UserSiteRow["sites"]): string {
  * Returns the signed-in user's profile plus every (site, role) they're
  * assigned to, or null if there's no session / the profile is inactive.
  * Safe to call from any Server Component or Server Action.
+ *
+ * Wrapped in React cache() so the layout and the page share one lookup per
+ * request instead of each repeating it. getClaims() verifies the session
+ * JWT (locally, when the project uses asymmetric signing keys) rather than
+ * always round-tripping to the Auth server, and the profile and site
+ * lookups run in parallel.
  */
-export async function getCurrentUser(): Promise<CurrentUser | null> {
+export const getCurrentUser = cache(async (): Promise<CurrentUser | null> => {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const { data: claimsData } = await supabase.auth.getClaims();
+  const userId = claimsData?.claims.sub;
 
-  if (!user) return null;
+  if (!userId) return null;
 
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("id, full_name, email, is_admin, is_active")
-    .eq("id", user.id)
-    .single();
+  const [{ data: profile }, { data: assignments }] = await Promise.all([
+    supabase
+      .from("profiles")
+      .select("id, full_name, email, is_admin, is_active")
+      .eq("id", userId)
+      .single(),
+    supabase
+      .from("user_sites")
+      .select("site_id, role, sites ( name )")
+      .eq("user_id", userId),
+  ]);
 
   if (!profile || !profile.is_active) return null;
-
-  const { data: assignments } = await supabase
-    .from("user_sites")
-    .select("site_id, role, sites ( name )")
-    .eq("user_id", user.id);
 
   const siteAssignments: SiteAssignment[] = (
     (assignments ?? []) as unknown as UserSiteRow[]
@@ -76,7 +83,7 @@ export async function getCurrentUser(): Promise<CurrentUser | null> {
     isAdmin: profile.is_admin,
     siteAssignments,
   };
-}
+});
 
 /** Redirects to /login if there's no signed-in, active user. */
 export async function requireUser(): Promise<CurrentUser> {

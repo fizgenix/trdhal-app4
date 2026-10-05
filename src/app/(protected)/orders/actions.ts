@@ -4,14 +4,19 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { requireUser } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
+import { flashToast } from "@/lib/toast";
+import { normalizeName } from "@/lib/fuzzy";
+import { canonicalUnit } from "@/lib/units";
 
 export type OrderFormState = { error: string | null; success: string | null };
 
 const newOrderSchema = z.object({
   siteId: z.string().min(1),
+  poNumber: z.string().trim().min(1, "Enter the PO number for this order."),
   itemId: z.string().min(1),
   newItemName: z.string().trim(),
-  newItemUnit: z.string().trim(),
+  // The order's unit. Standardised so a typed "Kgs" / "kilograms" lands as "kg".
+  unit: z.string().trim().min(1, "Choose the unit for this order.").transform(canonicalUnit),
   shopkeeperId: z.string().min(1),
   newShopkeeperName: z.string().trim(),
   newShopkeeperPhone: z.string().trim(),
@@ -19,7 +24,7 @@ const newOrderSchema = z.object({
 });
 
 /**
- * Creates an order. Handles the "add a new item / shopkeeper inline"
+ * Creates an order. Handles the "add a new item / vendor inline"
  * option (item_id / shopkeeper_id === '__new__') by inserting into the
  * relevant master table first, then using the new row's id — one form
  * submission, no separate trip to a master-data screen.
@@ -32,9 +37,13 @@ export async function createOrder(
 
   const parsed = newOrderSchema.safeParse({
     siteId: formData.get("site_id"),
+    poNumber: formData.get("po_number") ?? "",
     itemId: formData.get("item_id"),
     newItemName: formData.get("new_item_name") ?? "",
-    newItemUnit: formData.get("new_item_unit") ?? "",
+    // Unit picker posts the chosen unit, or "__new__" plus the typed one.
+    unit:
+      (formData.get("unit_id") === "__new__" ? formData.get("unit_new") : formData.get("unit_id")) ??
+      "",
     shopkeeperId: formData.get("shopkeeper_id"),
     newShopkeeperName: formData.get("new_shopkeeper_name") ?? "",
     newShopkeeperPhone: formData.get("new_shopkeeper_phone") ?? "",
@@ -63,13 +72,44 @@ export async function createOrder(
   const supabase = await createClient();
 
   let itemId = data.itemId;
+  if (itemId === "__new__" && !data.newItemName) {
+    return { error: "Enter a name for the new item.", success: null };
+  }
+  let shopkeeperId = data.shopkeeperId;
+  if (shopkeeperId === "__new__" && !data.newShopkeeperName) {
+    return { error: "Enter a name for the new vendor.", success: null };
+  }
+
+  // A "new" name that only differs from a saved one by case, spacing or
+  // punctuation reuses the saved one rather than creating a duplicate
+  // (the picker catches this too; this covers stale lists / races).
+  const [existingItems, existingShopkeepers] = await Promise.all([
+    itemId === "__new__"
+      ? supabase.from("items").select("id, name").then((r) => r.data ?? [])
+      : [],
+    shopkeeperId === "__new__"
+      ? supabase.from("shopkeepers").select("id, name").then((r) => r.data ?? [])
+      : [],
+  ]);
+
   if (itemId === "__new__") {
-    if (!data.newItemName || !data.newItemUnit) {
-      return { error: "Enter a name and a unit for the new item.", success: null };
-    }
+    const match = existingItems.find(
+      (i) => normalizeName(i.name) === normalizeName(data.newItemName),
+    );
+    if (match) itemId = match.id;
+  }
+  if (shopkeeperId === "__new__") {
+    const match = existingShopkeepers.find(
+      (s) => normalizeName(s.name) === normalizeName(data.newShopkeeperName),
+    );
+    if (match) shopkeeperId = match.id;
+  }
+
+  if (itemId === "__new__") {
     const { data: newItem, error: itemError } = await supabase
       .from("items")
-      .insert({ name: data.newItemName, unit: data.newItemUnit, created_by: user.id })
+      // items.unit is the item's usual unit — what the next order pre-fills.
+      .insert({ name: data.newItemName, unit: data.unit, created_by: user.id })
       .select("id")
       .single();
     if (itemError || !newItem) {
@@ -78,11 +118,7 @@ export async function createOrder(
     itemId = newItem.id;
   }
 
-  let shopkeeperId = data.shopkeeperId;
   if (shopkeeperId === "__new__") {
-    if (!data.newShopkeeperName) {
-      return { error: "Enter a name for the new shopkeeper.", success: null };
-    }
     const { data: newShopkeeper, error: shopkeeperError } = await supabase
       .from("shopkeepers")
       .insert({
@@ -94,37 +130,40 @@ export async function createOrder(
       .single();
     if (shopkeeperError || !newShopkeeper) {
       return {
-        error: shopkeeperError?.message ?? "Could not create the new shopkeeper.",
+        error: shopkeeperError?.message ?? "Could not create the new vendor.",
         success: null,
       };
     }
     shopkeeperId = newShopkeeper.id;
   }
 
-  // po_number isn't set here — it's auto-assigned by a column default
-  // (see supabase/migrations/0007_po_invoice_numbers.sql), so it's read
-  // back below purely to surface it in the confirmation message.
-  const { data: newOrder, error: orderError } = await supabase
+  const { error: orderError } = await supabase
     .from("orders")
     .insert({
+      po_number: data.poNumber,
       site_id: data.siteId,
       item_id: itemId,
       shopkeeper_id: shopkeeperId,
       quantity_ordered: data.quantityOrdered,
+      unit: data.unit,
       placed_by: user.id,
-    })
-    .select("po_number")
-    .single();
+    });
 
   if (orderError) {
+    // 23505 = unique_violation on orders_po_number_key.
+    if (orderError.code === "23505") {
+      return {
+        error: `PO number ${data.poNumber} is already used by another order.`,
+        success: null,
+      };
+    }
     return { error: orderError.message, success: null };
   }
 
   revalidatePath("/orders");
-  return {
-    error: null,
-    success: newOrder?.po_number ? `Order placed — ${newOrder.po_number}.` : "Order placed.",
-  };
+  const success = `Order placed — ${data.poNumber}.`;
+  await flashToast(success);
+  return { error: null, success };
 }
 
 /**
@@ -139,7 +178,10 @@ export async function editOrder(formData: FormData) {
   const quantityOrdered = Number(formData.get("quantity_ordered"));
   const note = String(formData.get("note") ?? "").trim();
 
-  if (!orderId || !Number.isFinite(quantityOrdered) || quantityOrdered <= 0) return;
+  if (!orderId || !Number.isFinite(quantityOrdered) || quantityOrdered <= 0) {
+    await flashToast("Enter a quantity greater than zero.", "error");
+    return;
+  }
 
   const supabase = await createClient();
 
@@ -149,15 +191,24 @@ export async function editOrder(formData: FormData) {
     .eq("id", orderId)
     .single();
 
-  if (!order || order.status !== "placed") return;
-  if (!user.isAdmin && order.placed_by !== user.id) return;
+  if (!order || order.status !== "placed") {
+    await flashToast("This order can no longer be edited.", "error");
+    return;
+  }
+  if (!user.isAdmin && order.placed_by !== user.id) {
+    await flashToast("Only the person who placed this order can edit it.", "error");
+    return;
+  }
 
   const { error } = await supabase
     .from("orders")
     .update({ quantity_ordered: quantityOrdered })
     .eq("id", orderId);
 
-  if (error) return;
+  if (error) {
+    await flashToast(error.message, "error");
+    return;
+  }
 
   await supabase.from("order_edit_log").insert({
     order_id: orderId,
@@ -168,6 +219,7 @@ export async function editOrder(formData: FormData) {
   });
 
   revalidatePath("/orders");
+  await flashToast(`Order updated — quantity is now ${quantityOrdered}.`);
 }
 
 /** Cancels an order (status -> 'cancelled'). Same ownership rule as edit. */
@@ -187,15 +239,24 @@ export async function cancelOrder(formData: FormData) {
     .eq("id", orderId)
     .single();
 
-  if (!order || order.status !== "placed") return;
-  if (!user.isAdmin && order.placed_by !== user.id) return;
+  if (!order || order.status !== "placed") {
+    await flashToast("This order can no longer be cancelled.", "error");
+    return;
+  }
+  if (!user.isAdmin && order.placed_by !== user.id) {
+    await flashToast("Only the person who placed this order can cancel it.", "error");
+    return;
+  }
 
   const { error } = await supabase
     .from("orders")
     .update({ status: "cancelled" })
     .eq("id", orderId);
 
-  if (error) return;
+  if (error) {
+    await flashToast(error.message, "error");
+    return;
+  }
 
   await supabase.from("order_edit_log").insert({
     order_id: orderId,
@@ -206,4 +267,5 @@ export async function cancelOrder(formData: FormData) {
   });
 
   revalidatePath("/orders");
+  await flashToast("Order cancelled.");
 }

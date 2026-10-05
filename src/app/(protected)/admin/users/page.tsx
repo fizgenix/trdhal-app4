@@ -1,7 +1,7 @@
 import { requireAdmin, SITE_ROLE_LABELS, type SiteRole } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { Select } from "@/components/ui/Select";
-import { Button } from "@/components/ui/Button";
+import { SubmitButton, SubmitIconButton } from "@/components/ui/SubmitButton";
 import { CreateUserForm } from "./CreateUserForm";
 import { assignUserToSite, removeUserSiteAssignment } from "./actions";
 
@@ -100,13 +100,12 @@ export default async function AdminUsersPage() {
                       <span>
                         {a.siteName} · {SITE_ROLE_LABELS[a.role] ?? a.role}
                       </span>
-                      <button
-                        type="submit"
+                      <SubmitIconButton
                         className="text-[#7a5608]/60 hover:text-red-600"
                         aria-label="Remove assignment"
                       >
                         ×
-                      </button>
+                      </SubmitIconButton>
                     </form>
                   ))}
                   {(assignmentsByUser.get(p.id) ?? []).length === 0 && (
@@ -143,9 +142,9 @@ export default async function AdminUsersPage() {
                       ))}
                     </Select>
                   </div>
-                  <Button type="submit" variant="secondary">
+                  <SubmitButton variant="secondary" pendingText="Assigning…">
                     Assign
-                  </Button>
+                  </SubmitButton>
                 </form>
               </>
             )}

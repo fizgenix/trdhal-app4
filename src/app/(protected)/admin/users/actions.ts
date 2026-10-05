@@ -5,6 +5,7 @@ import { z } from "zod";
 import { requireAdmin } from "@/lib/auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
+import { flashToast } from "@/lib/toast";
 
 export type UserFormState = { error: string | null; success: string | null };
 
@@ -54,7 +55,9 @@ export async function createUser(
   }
 
   revalidatePath("/admin/users");
-  return { error: null, success: `${fullName} can now sign in with ${email}.` };
+  const success = `${fullName} can now sign in with ${email}.`;
+  await flashToast(success);
+  return { error: null, success };
 }
 
 export async function assignUserToSite(formData: FormData) {
@@ -67,14 +70,20 @@ export async function assignUserToSite(formData: FormData) {
   if (!userId || !siteId || !role) return;
 
   const supabase = await createClient();
-  await supabase
+  const { error } = await supabase
     .from("user_sites")
     .upsert(
       { user_id: userId, site_id: siteId, role },
       { onConflict: "user_id,site_id,role" },
     );
 
+  if (error) {
+    await flashToast(error.message, "error");
+    return;
+  }
+
   revalidatePath("/admin/users");
+  await flashToast("Site access assigned.");
 }
 
 export async function removeUserSiteAssignment(formData: FormData) {
@@ -84,7 +93,13 @@ export async function removeUserSiteAssignment(formData: FormData) {
   if (!assignmentId) return;
 
   const supabase = await createClient();
-  await supabase.from("user_sites").delete().eq("id", assignmentId);
+  const { error } = await supabase.from("user_sites").delete().eq("id", assignmentId);
+
+  if (error) {
+    await flashToast(error.message, "error");
+    return;
+  }
 
   revalidatePath("/admin/users");
+  await flashToast("Site access removed.");
 }

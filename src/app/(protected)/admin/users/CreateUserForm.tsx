@@ -47,15 +47,10 @@ export function CreateUserForm() {
           {state.error}
         </p>
       )}
-      {state.success && (
-        <p className="rounded-lg bg-green-50 px-4 py-3 text-sm font-medium text-green-700 sm:col-span-2">
-          {state.success}
-        </p>
-      )}
 
       <div className="sm:col-span-2">
-        <Button type="submit" disabled={isPending}>
-          {isPending ? "Creating…" : "Create login"}
+        <Button type="submit" loading={isPending}>
+          {isPending ? "Creating… please wait" : "Create login"}
         </Button>
       </div>
     </form>

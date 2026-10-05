@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { requireUser } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
+import { flashToast } from "@/lib/toast";
 
 export type ApprovalFormState = { error: string | null; success: string | null };
 
@@ -52,5 +53,6 @@ export async function approveOrder(
   revalidatePath("/approvals");
   revalidatePath("/orders");
   revalidatePath("/receiving");
+  await flashToast("Order approved and completed.");
   return { error: null, success: "Order approved and completed." };
 }

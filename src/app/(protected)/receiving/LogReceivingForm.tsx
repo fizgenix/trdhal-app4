@@ -1,6 +1,7 @@
 "use client";
 
-import { useActionState, useState } from "react";
+import { useActionState, useState, useSyncExternalStore } from "react";
+import { Spinner } from "@/components/ui/Button";
 import { logReceiving, type ReceivingFormState } from "./actions";
 
 const initialState: ReceivingFormState = { error: null, success: null };
@@ -8,8 +9,23 @@ const initialState: ReceivingFormState = { error: null, success: null };
 const ROW_GRID =
   "grid grid-cols-[44px_1.3fr_0.9fr_0.8fr_0.8fr_0.9fr_1fr_auto] items-center gap-2.5 px-5 py-3.5";
 
-function today() {
-  return new Date().toISOString().slice(0, 10);
+/** Today's date in the browser's own timezone, as YYYY-MM-DD. */
+function localToday() {
+  const now = new Date();
+  const mm = String(now.getMonth() + 1).padStart(2, "0");
+  const dd = String(now.getDate()).padStart(2, "0");
+  return `${now.getFullYear()}-${mm}-${dd}`;
+}
+
+const noopSubscribe = () => () => {};
+
+/**
+ * Today's date, read in the browser rather than during server rendering —
+ * the server's clock/timezone can differ from the user's, which would put
+ * the date picker's limit on the wrong day.
+ */
+function useToday() {
+  return useSyncExternalStore(noopSubscribe, localToday, () => undefined);
 }
 
 function ProgressRing({ percent }: { percent: number }) {
@@ -49,6 +65,7 @@ export function LogReceivingForm({
   remainingQuantity: number;
 }) {
   const [state, formAction, isPending] = useActionState(logReceiving, initialState);
+  const today = useToday();
   const [formKey, setFormKey] = useState(0);
 
   // Same render-time reset pattern as NewOrderForm — see the comment
@@ -96,7 +113,10 @@ export function LogReceivingForm({
       <input
         name="received_date"
         type="date"
-        defaultValue={today()}
+        defaultValue={today}
+        // Deliveries can't be logged ahead of time — future days are greyed
+        // out in the picker (also enforced in logReceiving and the DB).
+        max={today}
         disabled={isDone}
         required
         className="w-full rounded-lg border border-brand-input-border px-2.5 py-2 text-xs text-brand-navy focus:border-brand-gold focus:outline-none focus:ring-2 focus:ring-brand-gold/40 disabled:bg-gray-50 disabled:text-gray-300"
@@ -122,19 +142,22 @@ export function LogReceivingForm({
       <button
         type="submit"
         disabled={isPending || isDone}
-        className="rounded-full border border-brand-navy px-3.5 py-2 text-xs font-bold text-brand-navy hover:bg-brand-navy hover:text-white disabled:cursor-not-allowed disabled:border-gray-200 disabled:text-gray-300 disabled:hover:bg-transparent"
+        aria-busy={isPending || undefined}
+        className="inline-flex items-center gap-1.5 rounded-full border border-brand-navy px-3.5 py-2 text-xs font-bold text-brand-navy hover:bg-brand-navy hover:text-white disabled:cursor-not-allowed disabled:border-gray-200 disabled:text-gray-300 disabled:hover:bg-transparent"
       >
-        {isPending ? "…" : "Log"}
+        {isPending ? (
+          <>
+            <Spinner className="h-3 w-3" />
+            Saving…
+          </>
+        ) : (
+          "Log"
+        )}
       </button>
 
       {state.error && (
         <p className="col-span-full rounded-lg bg-red-50 px-3 py-2 text-xs font-medium text-red-700">
           {state.error}
-        </p>
-      )}
-      {state.success && (
-        <p className="col-span-full rounded-lg bg-green-50 px-3 py-2 text-xs font-medium text-green-700">
-          {state.success}
         </p>
       )}
     </form>

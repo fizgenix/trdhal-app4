@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 
 /**
  * Debounced text search over the order list — matches against item name
- * and shopkeeper name (server-side, in OrdersPage). Pushes `?q=` onto the
+ * and vendor name (server-side, in OrdersPage). Pushes `?q=` onto the
  * URL (alongside the current site/status) so the filter is shareable and
  * survives a refresh, the same pattern the status tabs already use.
  */
@@ -66,8 +66,8 @@ export function OrderSearchBox({
         type="search"
         value={value}
         onChange={(e) => handleChange(e.target.value)}
-        placeholder="Search item or shopkeeper…"
-        aria-label="Search orders by item or shopkeeper"
+        placeholder="Search item or vendor…"
+        aria-label="Search orders by item or vendor"
         className="w-full rounded-[10px] border border-brand-input-border bg-white py-2.5 pl-9 pr-3.5 text-[15px] text-brand-navy placeholder:text-gray-400 focus:border-brand-gold focus:outline-none focus:ring-2 focus:ring-brand-gold/40"
       />
     </div>

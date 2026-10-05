@@ -1,22 +1,25 @@
 import { requireUser } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { SiteSwitcher } from "@/components/SiteSwitcher";
+import { resolveSelectedSiteId } from "@/lib/selected-site";
 import { CardHeaderBand } from "@/components/ui/CardHeaderBand";
 import { ReleaseInventoryForm } from "./ReleaseInventoryForm";
 
 type Rel<T> = T | T[] | null;
 
-type SiteInventoryRow = { item_id: string; quantity_available: number };
-type ItemRow = { id: string; name: string; unit: string };
+type SiteInventoryRow = { item_id: string; unit: string; quantity_available: number };
+type ItemRow = { id: string; name: string };
 type BuildingRow = { id: string; name: string };
-type StockItem = { id: string; name: string; unit: string; available: number };
+/** One stock line — an item in one unit (the same item in another unit is a separate line). */
+type StockItem = { key: string; itemId: string; name: string; unit: string; available: number };
 
 type ReleaseLogRow = {
   id: string;
   quantity_released: number;
   quality_notes: string | null;
   released_date: string;
-  items: Rel<{ name: string; unit: string }>;
+  unit: string;
+  items: Rel<{ name: string }>;
   buildings: Rel<{ name: string }>;
   profiles: Rel<{ full_name: string }>;
 };
@@ -62,8 +65,7 @@ export default async function ReleasePage({
     );
   }
 
-  const selectedSiteId =
-    siteParam && sites.some((s) => s.id === siteParam) ? siteParam : sites[0].id;
+  const selectedSiteId = await resolveSelectedSiteId(sites, siteParam);
 
   const canReleaseHere =
     user.isAdmin ||
@@ -75,14 +77,14 @@ export default async function ReleasePage({
     await Promise.all([
       supabase
         .from("site_inventory")
-        .select("item_id, quantity_available")
+        .select("item_id, unit, quantity_available")
         .eq("site_id", selectedSiteId),
-      supabase.from("items").select("id, name, unit").order("name"),
+      supabase.from("items").select("id, name").order("name"),
       supabase.from("buildings").select("id, name").eq("site_id", selectedSiteId).order("name"),
       supabase
         .from("inventory_releases")
         .select(
-          "id, quantity_released, quality_notes, released_date, items ( name, unit ), buildings ( name ), profiles ( full_name )",
+          "id, quantity_released, unit, quality_notes, released_date, items ( name ), buildings ( name ), profiles ( full_name )",
         )
         .eq("site_id", selectedSiteId)
         .order("released_date", { ascending: false })
@@ -97,14 +99,15 @@ export default async function ReleasePage({
       const item = itemsById.get(row.item_id);
       if (!item) return null;
       return {
-        id: row.item_id,
+        key: `${row.item_id}|${row.unit}`,
+        itemId: row.item_id,
         name: item.name,
-        unit: item.unit,
+        unit: row.unit,
         available: Number(row.quantity_available),
       };
     })
     .filter((v): v is StockItem => v !== null && v.available > 0)
-    .sort((a, b) => a.name.localeCompare(b.name));
+    .sort((a, b) => a.name.localeCompare(b.name) || a.unit.localeCompare(b.unit));
 
   const buildings = (buildingsData ?? []) as BuildingRow[];
   const releases = (releasesData ?? []) as unknown as ReleaseLogRow[];
@@ -134,7 +137,7 @@ export default async function ReleasePage({
             <div className="mt-1 flex flex-col">
               {stockItems.map((i) => (
                 <div
-                  key={i.id}
+                  key={i.key}
                   className="flex items-center justify-between border-b border-brand-border-soft py-2.5 text-sm last:border-0"
                 >
                   <span className="text-brand-navy">
@@ -180,7 +183,7 @@ export default async function ReleasePage({
                 className="rounded-2xl border border-brand-border bg-white p-5 shadow-sm"
               >
                 <p className="font-semibold text-brand-navy">
-                  {release.quantity_released} {item?.unit} of {item?.name ?? "Unknown item"}{" "}
+                  {release.quantity_released} {release.unit} of {item?.name ?? "Unknown item"}{" "}
                   → {building?.name ?? "Unknown building"}
                 </p>
                 <p className="text-xs text-[#7b8494]">

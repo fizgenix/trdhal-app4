@@ -6,8 +6,10 @@ import { Field } from "@/components/ui/Field";
 import { Select } from "@/components/ui/Select";
 import { Button } from "@/components/ui/Button";
 import { CardHeaderBand } from "@/components/ui/CardHeaderBand";
+import { SearchableSelect } from "@/components/ui/SearchableSelect";
 
-type StockItem = { id: string; name: string; unit: string; available: number };
+/** One stock line — an item in one unit. */
+type StockItem = { key: string; itemId: string; name: string; unit: string; available: number };
 type Building = { id: string; name: string };
 
 const initialState: ReleaseFormState = { error: null, success: null };
@@ -22,8 +24,7 @@ export function ReleaseInventoryForm({
   buildings: Building[];
 }) {
   const [state, formAction, isPending] = useActionState(releaseInventory, initialState);
-  const [selectedItemId, setSelectedItemId] = useState("");
-  const [isNewBuilding, setIsNewBuilding] = useState(false);
+  const [selectedKey, setSelectedKey] = useState("");
   const [formKey, setFormKey] = useState(0);
 
   // Same render-time reset pattern used by the other forms in this app.
@@ -32,14 +33,13 @@ export function ReleaseInventoryForm({
     setPrevState(state);
     if (state.success) {
       setFormKey((k) => k + 1);
-      setSelectedItemId("");
-      setIsNewBuilding(false);
+      setSelectedKey("");
     }
   }
 
   const selectedItem = useMemo(
-    () => stockItems.find((i) => i.id === selectedItemId) ?? null,
-    [selectedItemId, stockItems],
+    () => stockItems.find((i) => i.key === selectedKey) ?? null,
+    [selectedKey, stockItems],
   );
 
   return (
@@ -57,20 +57,23 @@ export function ReleaseInventoryForm({
       <div className="sm:col-span-2">
         <Select
           label="Item"
-          name="item_id"
+          name="stock_line"
           required
           defaultValue=""
-          onChange={(e) => setSelectedItemId(e.target.value)}
+          onChange={(e) => setSelectedKey(e.target.value)}
         >
           <option value="" disabled>
             Choose an item
           </option>
           {stockItems.map((i) => (
-            <option key={i.id} value={i.id}>
+            <option key={i.key} value={i.key}>
               {i.name} — {i.available} {i.unit} available
             </option>
           ))}
         </Select>
+        {/* Stock is per item *and* unit, so both go to the server. */}
+        <input type="hidden" name="item_id" value={selectedItem?.itemId ?? ""} />
+        <input type="hidden" name="unit" value={selectedItem?.unit ?? ""} />
       </div>
 
       <Field
@@ -86,34 +89,19 @@ export function ReleaseInventoryForm({
         max={selectedItem ? selectedItem.available : undefined}
         placeholder="e.g. 50"
         required
+        suffix={selectedItem?.unit}
       />
 
-      <Select
+      <SearchableSelect
         label="Destination building"
         name="destination_building_id"
+        newNameField="new_building_name"
+        noun="building"
+        savedWhen="you release the stock"
         required
-        defaultValue=""
-        onChange={(e) => setIsNewBuilding(e.target.value === "__new__")}
-      >
-        <option value="" disabled>
-          Choose a building
-        </option>
-        {buildings.map((b) => (
-          <option key={b.id} value={b.id}>
-            {b.name}
-          </option>
-        ))}
-        <option value="__new__">+ Add a new building…</option>
-      </Select>
-
-      {isNewBuilding && (
-        <Field
-          label="New building name"
-          name="new_building_name"
-          placeholder="e.g. Building 3"
-          required={isNewBuilding}
-        />
-      )}
+        placeholder="Search or add a building…"
+        options={buildings.map((b) => ({ id: b.id, name: b.name, label: b.name }))}
+      />
 
       <div className="sm:col-span-2">
         <Field
@@ -128,15 +116,10 @@ export function ReleaseInventoryForm({
           {state.error}
         </p>
       )}
-      {state.success && (
-        <p className="rounded-lg bg-green-50 px-4 py-3 text-sm font-medium text-green-700 sm:col-span-2">
-          {state.success}
-        </p>
-      )}
 
       <div className="sm:col-span-2">
-        <Button type="submit" disabled={isPending} fullWidth>
-          {isPending ? "Releasing…" : "Release inventory"}
+        <Button type="submit" loading={isPending} fullWidth>
+          {isPending ? "Releasing… please wait" : "Release inventory"}
         </Button>
       </div>
     </form>

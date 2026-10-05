@@ -1,7 +1,7 @@
 import { requireAdmin } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { Field } from "@/components/ui/Field";
-import { Button } from "@/components/ui/Button";
+import { SubmitButton } from "@/components/ui/SubmitButton";
 import { CardHeaderBand } from "@/components/ui/CardHeaderBand";
 import { createSite } from "./actions";
 
@@ -35,7 +35,7 @@ export default async function AdminSitesPage() {
           <CardHeaderBand inset={5}>Add a site</CardHeaderBand>
           <Field label="Site name" name="name" placeholder="e.g. Sector 12 Tower" required />
           <Field label="Location (optional)" name="location" placeholder="e.g. Agra, UP" />
-          <Button type="submit">Add site</Button>
+          <SubmitButton pendingText="Adding site… please wait">Add site</SubmitButton>
         </form>
 
         <div className="overflow-hidden rounded-2xl border border-brand-border bg-white shadow-sm">

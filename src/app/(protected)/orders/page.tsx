@@ -2,9 +2,10 @@ import Link from "next/link";
 import { requireUser } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { SiteSwitcher } from "@/components/SiteSwitcher";
+import { resolveSelectedSiteId } from "@/lib/selected-site";
 import { StatusBadge } from "@/components/StatusBadge";
 import { Field } from "@/components/ui/Field";
-import { Button } from "@/components/ui/Button";
+import { SubmitButton } from "@/components/ui/SubmitButton";
 import { NewOrderForm } from "./NewOrderForm";
 import { OrderSearchBox } from "./OrderSearchBox";
 import { editOrder, cancelOrder } from "./actions";
@@ -29,7 +30,10 @@ type OrderJoinRow = {
   status: OrderStatus;
   placed_date: string;
   placed_by: string;
-  items: Rel<{ name: string; unit: string }>;
+  item_id: string;
+  /** The order's own unit — receiving and approval stay in it. */
+  unit: string;
+  items: Rel<{ name: string }>;
   shopkeepers: Rel<{ name: string }>;
   profiles: Rel<{ full_name: string }>;
 };
@@ -97,8 +101,7 @@ export default async function OrdersPage({
     );
   }
 
-  const selectedSiteId =
-    siteParam && sites.some((s) => s.id === siteParam) ? siteParam : sites[0].id;
+  const selectedSiteId = await resolveSelectedSiteId(sites, siteParam);
 
   const canOrderHere =
     user.isAdmin ||
@@ -106,33 +109,52 @@ export default async function OrdersPage({
       (a) => a.site_id === selectedSiteId && a.role === "ho1_ordering",
     );
 
-  const [{ data: items }, { data: shopkeepers }, { data: ordersData }, { data: nextPoNumber }] =
+  const [{ data: items }, { data: shopkeepers }, { data: ordersData }] =
     await Promise.all([
       supabase.from("items").select("id, name, unit").order("name"),
       supabase.from("shopkeepers").select("id, name").order("name"),
       supabase
         .from("orders")
         .select(
-          "id, po_number, quantity_ordered, status, placed_date, placed_by, items ( name, unit ), shopkeepers ( name ), profiles ( full_name )",
+          "id, item_id, po_number, quantity_ordered, unit, status, placed_date, placed_by, items ( name ), shopkeepers ( name ), profiles ( full_name )",
         )
         .eq("site_id", selectedSiteId)
         .order("placed_date", { ascending: false }),
-      canOrderHere
-        ? supabase.rpc("peek_next_po_number")
-        : Promise.resolve({ data: null as string | null }),
     ]);
 
   const orders = (ordersData ?? []) as unknown as OrderJoinRow[];
+
+  // Pre-fill the new-order unit with the one this item was last ordered in
+  // at this site (orders are newest-first), falling back to the item's own.
+  const lastUnitByItem = new Map<string, string>();
+  for (const order of orders) {
+    if (!lastUnitByItem.has(order.item_id)) lastUnitByItem.set(order.item_id, order.unit);
+  }
+  const itemsWithUsualUnit = ((items ?? []) as ItemRow[]).map((item) => ({
+    ...item,
+    unit: lastUnitByItem.get(item.id) ?? item.unit,
+  }));
   const orderIds = orders.map((o) => o.id);
 
-  const { data: editLogsData } =
+  // History lookups are independent of each other, so fetch them together.
+  const [{ data: editLogsData }, { data: receivingLogsData }, { data: approvalsData }] =
     orderIds.length > 0
-      ? await supabase
-          .from("order_edit_log")
-          .select("id, order_id, action, note, edited_at, profiles ( full_name )")
-          .in("order_id", orderIds)
-          .order("edited_at", { ascending: false })
-      : { data: [] as EditLogJoinRow[] };
+      ? await Promise.all([
+          supabase
+            .from("order_edit_log")
+            .select("id, order_id, action, note, edited_at, profiles ( full_name )")
+            .in("order_id", orderIds)
+            .order("edited_at", { ascending: false }),
+          supabase
+            .from("receiving_logs")
+            .select("order_id, quantity_received, invoice_number")
+            .in("order_id", orderIds),
+          supabase
+            .from("approvals")
+            .select("order_id, approved_date, remarks, profiles ( full_name )")
+            .in("order_id", orderIds),
+        ])
+      : [{ data: [] }, { data: [] }, { data: [] }];
 
   const editLogs = (editLogsData ?? []) as unknown as EditLogJoinRow[];
   const logsByOrder = new Map<string, EditLogJoinRow[]>();
@@ -146,14 +168,6 @@ export default async function OrdersPage({
   // approved) even after completion" — pull the received total (and each
   // delivery's invoice number) per order so that history shows here too,
   // not just on the Receiving page.
-  const { data: receivingLogsData } =
-    orderIds.length > 0
-      ? await supabase
-          .from("receiving_logs")
-          .select("order_id, quantity_received, invoice_number")
-          .in("order_id", orderIds)
-      : { data: [] as ReceivingLogRow[] };
-
   const receivedTotalByOrder = new Map<string, number>();
   const invoiceNumbersByOrder = new Map<string, string[]>();
   for (const row of (receivingLogsData ?? []) as unknown as ReceivingLogRow[]) {
@@ -168,20 +182,12 @@ export default async function OrdersPage({
     }
   }
 
-  const { data: approvalsData } =
-    orderIds.length > 0
-      ? await supabase
-          .from("approvals")
-          .select("order_id, approved_date, remarks, profiles ( full_name )")
-          .in("order_id", orderIds)
-      : { data: [] as ApprovalJoinRow[] };
-
   const approvalByOrder = new Map<string, ApprovalJoinRow>();
   for (const approval of (approvalsData ?? []) as unknown as ApprovalJoinRow[]) {
     approvalByOrder.set(approval.order_id, approval);
   }
 
-  // Search matches the item name or shopkeeper name — applied on top of
+  // Search matches the item name or vendor name — applied on top of
   // (not instead of) the status tab filter below.
   const q = (qParam ?? "").trim().toLowerCase();
   const searchFiltered = q
@@ -214,10 +220,8 @@ export default async function OrdersPage({
       {canOrderHere ? (
         <NewOrderForm
           siteId={selectedSiteId}
-          items={(items ?? []) as ItemRow[]}
-          shopkeepers={(shopkeepers ?? []) as ShopkeeperRow[]}
-          nextPoNumber={nextPoNumber}
-        />
+          items={itemsWithUsualUnit}
+          shopkeepers={(shopkeepers ?? []) as ShopkeeperRow[]}        />
       ) : (
         <p className="rounded-2xl border border-dashed border-brand-border bg-white p-6 text-center text-sm text-[#7b8494]">
           You have view-only access at this site. Only Ordering (HO1) users can place new
@@ -286,7 +290,7 @@ export default async function OrdersPage({
                     <p className="text-[15px] font-bold text-brand-navy">
                       {item?.name ?? "Unknown item"}{" "}
                       <span className="text-xs font-normal text-[#7b8494]">
-                        ({item?.unit})
+                        ({order.unit})
                       </span>
                     </p>
                     <span className="rounded-full border border-brand-border bg-brand-cream px-2 py-0.5 font-mono text-[11px] font-bold text-brand-navy">
@@ -294,8 +298,8 @@ export default async function OrdersPage({
                     </span>
                   </div>
                   <p className="mt-0.5 text-xs text-[#6b7280]">
-                    Ordered: {order.quantity_ordered} {item?.unit} · Received so far:{" "}
-                    {receivedSoFar} {item?.unit} · Shopkeeper: {shopkeeper?.name ?? "—"}
+                    Ordered: {order.quantity_ordered} {order.unit} · Received so far:{" "}
+                    {receivedSoFar} {order.unit} · Vendor: {shopkeeper?.name ?? "—"}
                   </p>
                   <p className="mt-0.5 text-[11px] text-[#7b8494]">
                     Placed by {placedByProfile?.full_name ?? "Unknown"} on{" "}
@@ -352,9 +356,7 @@ export default async function OrdersPage({
                           placeholder="e.g. corrected typo"
                         />
                       </div>
-                      <Button type="submit" variant="secondary">
-                        Save
-                      </Button>
+                      <SubmitButton variant="secondary">Save</SubmitButton>
                     </form>
                   </details>
 
@@ -371,9 +373,9 @@ export default async function OrdersPage({
                           placeholder="e.g. wrong item ordered"
                         />
                       </div>
-                      <Button type="submit" variant="danger">
+                      <SubmitButton variant="danger" pendingText="Cancelling… please wait">
                         Cancel this order
-                      </Button>
+                      </SubmitButton>
                     </form>
                   </details>
                 </div>

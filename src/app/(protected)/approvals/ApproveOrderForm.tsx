@@ -32,18 +32,13 @@ export function ApproveOrderForm({ orderId }: { orderId: string }) {
           placeholder="e.g. matches delivery challan, all good"
         />
       </div>
-      <Button type="submit" disabled={isPending}>
-        {isPending ? "Approving…" : "Approve order"}
+      <Button type="submit" loading={isPending}>
+        {isPending ? "Approving… please wait" : "Approve order"}
       </Button>
 
       {state.error && (
         <p className="w-full rounded-lg bg-red-50 px-4 py-3 text-sm font-medium text-red-700">
           {state.error}
-        </p>
-      )}
-      {state.success && (
-        <p className="w-full rounded-lg bg-green-50 px-4 py-3 text-sm font-medium text-green-700">
-          {state.success}
         </p>
       )}
     </form>

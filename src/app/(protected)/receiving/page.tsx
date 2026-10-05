@@ -1,6 +1,7 @@
 import { requireUser } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { SiteSwitcher } from "@/components/SiteSwitcher";
+import { resolveSelectedSiteId } from "@/lib/selected-site";
 import { StatusBadge } from "@/components/StatusBadge";
 import { LogReceivingForm } from "./LogReceivingForm";
 import type { OrderStatus } from "@/types/database";
@@ -12,7 +13,9 @@ type OpenOrderRow = {
   quantity_ordered: number;
   status: OrderStatus;
   placed_date: string;
-  items: Rel<{ name: string; unit: string }>;
+  /** The order's own unit — receiving and approval stay in it. */
+  unit: string;
+  items: Rel<{ name: string }>;
   shopkeepers: Rel<{ name: string }>;
   profiles: Rel<{ full_name: string }>;
 };
@@ -68,8 +71,7 @@ export default async function ReceivingPage({
     );
   }
 
-  const selectedSiteId =
-    siteParam && sites.some((s) => s.id === siteParam) ? siteParam : sites[0].id;
+  const selectedSiteId = await resolveSelectedSiteId(sites, siteParam);
 
   const canReceiveHere =
     user.isAdmin ||
@@ -80,7 +82,7 @@ export default async function ReceivingPage({
   const { data: ordersData } = await supabase
     .from("orders")
     .select(
-      "id, quantity_ordered, status, placed_date, items ( name, unit ), shopkeepers ( name ), profiles ( full_name )",
+      "id, quantity_ordered, unit, status, placed_date, items ( name ), shopkeepers ( name ), profiles ( full_name )",
     )
     .eq("site_id", selectedSiteId)
     .in("status", ["placed", "pending_approval"])
@@ -170,7 +172,7 @@ export default async function ReceivingPage({
                     <StatusBadge status={order.status} />
                   </div>
                   <p className="px-4 pb-1 text-xs text-[#7b8494] sm:hidden">
-                    Shopkeeper: {shopkeeper?.name ?? "—"} · Placed by{" "}
+                    Vendor: {shopkeeper?.name ?? "—"} · Placed by{" "}
                     {placedByProfile?.full_name ?? "Unknown"} on{" "}
                     {formatDate(order.placed_date)}
                   </p>
@@ -179,7 +181,7 @@ export default async function ReceivingPage({
                     <LogReceivingForm
                       orderId={order.id}
                       itemName={item?.name ?? "Unknown item"}
-                      itemUnit={item?.unit}
+                      itemUnit={order.unit}
                       quantityOrdered={order.quantity_ordered}
                       receivedSoFar={receivedSoFar}
                       remainingQuantity={order.quantity_ordered - receivedSoFar}
@@ -188,7 +190,7 @@ export default async function ReceivingPage({
                     <div className="flex items-center justify-between gap-3 px-5 py-3.5 text-sm">
                       <span className="font-bold text-brand-navy">
                         {item?.name ?? "Unknown item"}{" "}
-                        <span className="font-normal text-[#7b8494]">({item?.unit})</span>
+                        <span className="font-normal text-[#7b8494]">({order.unit})</span>
                       </span>
                       <span className="text-xs text-[#6b7280]">
                         {order.quantity_ordered} / {receivedSoFar}
@@ -202,7 +204,7 @@ export default async function ReceivingPage({
                       {orderLogs
                         .map((log) => {
                           const receiver = one(log.profiles);
-                          return `${log.quantity_received} ${item?.unit ?? ""} logged by ${
+                          return `${log.quantity_received} ${order.unit} logged by ${
                             receiver?.full_name ?? "Unknown"
                           } on ${formatDate(log.received_date)}${
                             log.invoice_number ? ` · Invoice ${log.invoice_number}` : ""
