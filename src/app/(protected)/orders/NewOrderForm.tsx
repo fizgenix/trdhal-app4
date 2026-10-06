@@ -3,13 +3,11 @@
 import { useActionState, useState } from "react";
 import { createOrder, type OrderFormState } from "./actions";
 import { Field } from "@/components/ui/Field";
-import { canonicalUnit, STANDARD_UNITS } from "@/lib/units";
 import { Button } from "@/components/ui/Button";
 import { CardHeaderBand } from "@/components/ui/CardHeaderBand";
 import { NEW_ID, SearchableSelect } from "@/components/ui/SearchableSelect";
+import { OrderLineFields, type OrderItemOption } from "./OrderLineFields";
 
-/** `unit` is the item's usual unit — pre-filled on the order, which can change it. */
-type Item = { id: string; name: string; unit: string };
 type Shopkeeper = { id: string; name: string };
 
 const initialState: OrderFormState = { error: null, success: null };
@@ -20,14 +18,16 @@ export function NewOrderForm({
   shopkeepers,
 }: {
   siteId: string;
-  items: Item[];
+  items: OrderItemOption[];
   shopkeepers: Shopkeeper[];
 }) {
   const [state, formAction, isPending] = useActionState(createOrder, initialState);
-  const [selectedItemId, setSelectedItemId] = useState("");
-  const [orderUnit, setOrderUnit] = useState("");
   const [isNewShopkeeper, setIsNewShopkeeper] = useState(false);
   const [formKey, setFormKey] = useState(0);
+  // Keys of the item lines on screen. Keys are never reused, so removing a
+  // line doesn't shift the fields of the lines below it.
+  const [lineKeys, setLineKeys] = useState([0]);
+  const [nextLineKey, setNextLineKey] = useState(1);
 
   // Clear the form after a successful submit — fields are uncontrolled so
   // re-mounting (via the key bump) is what resets them, rather than
@@ -40,28 +40,15 @@ export function NewOrderForm({
     setPrevState(state);
     if (state.success) {
       setFormKey((k) => k + 1);
-      setSelectedItemId("");
-      setOrderUnit("");
       setIsNewShopkeeper(false);
+      setLineKeys([0]);
+      setNextLineKey(1);
     }
   }
 
-  // Standard units plus any other unit already used on an item, so a
-  // custom one added once ("trolley") is offered next time too.
-  const unitOptions = [
-    ...STANDARD_UNITS.map((u) => ({ id: u.value, name: u.value, label: u.label })),
-    ...Array.from(new Set(items.map((i) => i.unit)))
-      .filter((unit) => !STANDARD_UNITS.some((u) => u.value === unit))
-      .map((unit) => ({ id: unit, name: unit, label: unit })),
-  ];
-  const unitLabel = (unit: string) => unitOptions.find((u) => u.id === unit)?.label ?? unit;
-
-  // Picking an item pre-fills the unit with its usual one; the user can
-  // still change it for this order.
-  function handleItemSelect(id: string) {
-    setSelectedItemId(id);
-    const usual = items.find((i) => i.id === id)?.unit;
-    if (usual) setOrderUnit(usual);
+  function addLine() {
+    setLineKeys((keys) => [...keys, nextLineKey]);
+    setNextLineKey((k) => k + 1);
   }
 
   return (
@@ -71,68 +58,24 @@ export function NewOrderForm({
       className="grid gap-4 rounded-2xl border border-brand-border bg-white p-6 shadow-sm sm:grid-cols-2"
     >
       <input type="hidden" name="site_id" value={siteId} />
+      <input type="hidden" name="line_keys" value={lineKeys.join(",")} />
 
       <div className="sm:col-span-2">
         <CardHeaderBand>Place a new order</CardHeaderBand>
       </div>
 
-      <div className="sm:col-span-2">
-        <Field label="PO Number" name="po_number" placeholder="e.g. PO-00123" required />
-      </div>
+      <Field label="PO Number" name="po_number" placeholder="e.g. PO-00123" required />
 
-      <div className="sm:col-span-2">
-        <SearchableSelect
-          label="Item"
-          name="item_id"
-          newNameField="new_item_name"
-          noun="item"
-          required
-          placeholder="Search or add an item…"
-          options={items.map((i) => ({ id: i.id, name: i.name, label: i.name }))}
-          onSelect={handleItemSelect}
-        />
-      </div>
-
-      <Field
-        label="Quantity ordered"
-        name="quantity_ordered"
-        type="number"
-        step="0.01"
-        min="0.01"
-        placeholder="e.g. 250"
-        required
-        suffix={orderUnit || undefined}
-      />
-
-      {/* The order's unit — fixed once the order is placed: its receiving,
-          approval and stock all stay in this unit. Re-keyed on item change
-          so it re-mounts pre-filled with that item's usual unit. */}
       <SearchableSelect
-        key={`unit-${selectedItemId}`}
-        label="Unit"
-        name="unit_id"
-        newNameField="unit_new"
-        noun="unit"
+        label="Vendor"
+        name="shopkeeper_id"
+        newNameField="new_shopkeeper_name"
+        noun="vendor"
         required
-        placeholder="Search or add a unit…"
-        options={unitOptions}
-        initial={orderUnit ? { id: orderUnit, label: unitLabel(orderUnit) } : undefined}
-        canonicalize={canonicalUnit}
-        onSelect={(id, text) => setOrderUnit(id === NEW_ID ? text.trim() : id)}
+        placeholder="Search or add a vendor…"
+        options={shopkeepers.map((s) => ({ id: s.id, name: s.name, label: s.name }))}
+        onSelect={(id) => setIsNewShopkeeper(id === NEW_ID)}
       />
-
-      <div className="sm:col-span-2">
-        <SearchableSelect
-          label="Vendor"
-          name="shopkeeper_id"
-          newNameField="new_shopkeeper_name"
-          noun="vendor"
-          required
-          placeholder="Search or add a vendor…"
-          options={shopkeepers.map((s) => ({ id: s.id, name: s.name, label: s.name }))}
-          onSelect={(id) => setIsNewShopkeeper(id === NEW_ID)}
-        />
-      </div>
 
       {isNewShopkeeper && (
         <div className="sm:col-span-2">
@@ -145,6 +88,35 @@ export function NewOrderForm({
         </div>
       )}
 
+      <div className="flex flex-col gap-3 border-t border-brand-border-soft pt-4 sm:col-span-2">
+        <p className="text-[10.5px] font-bold uppercase tracking-wider text-[#8a836f]">
+          Items on this PO ({lineKeys.length})
+        </p>
+        {lineKeys.map((key, i) => (
+          <div
+            key={key}
+            className={i > 0 ? "border-t border-dashed border-brand-border-soft pt-3" : ""}
+          >
+            <OrderLineFields
+              lineKey={key}
+              items={items}
+              onRemove={
+                lineKeys.length > 1
+                  ? () => setLineKeys((keys) => keys.filter((k) => k !== key))
+                  : undefined
+              }
+            />
+          </div>
+        ))}
+        <button
+          type="button"
+          onClick={addLine}
+          className="self-start rounded-full border border-dashed border-brand-navy px-4 py-2 text-sm font-bold text-brand-navy hover:bg-brand-cream"
+        >
+          + Add another item
+        </button>
+      </div>
+
       {state.error && (
         <p className="rounded-lg bg-red-50 px-4 py-3 text-sm font-medium text-red-700 sm:col-span-2">
           {state.error}
@@ -153,7 +125,9 @@ export function NewOrderForm({
 
       <div className="sm:col-span-2">
         <Button type="submit" loading={isPending} fullWidth>
-          {isPending ? "Placing order… please wait" : "Place order"}
+          {isPending
+            ? "Placing order… please wait"
+            : `Place order (${lineKeys.length} item${lineKeys.length === 1 ? "" : "s"})`}
         </Button>
       </div>
     </form>

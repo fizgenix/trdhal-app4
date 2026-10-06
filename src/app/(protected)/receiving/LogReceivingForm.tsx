@@ -3,6 +3,7 @@
 import { useActionState, useState, useSyncExternalStore } from "react";
 import { Spinner } from "@/components/ui/Button";
 import { logReceiving, type ReceivingFormState } from "./actions";
+import { OverReceivedBadge } from "@/components/OverReceivedBadge";
 
 const initialState: ReceivingFormState = { error: null, success: null };
 
@@ -28,9 +29,12 @@ function useToday() {
   return useSyncExternalStore(noopSubscribe, localToday, () => undefined);
 }
 
+/** `percent` can pass 100 on an over-received line — the ring turns red and shows it. */
 function ProgressRing({ percent }: { percent: number }) {
   const color =
-    percent >= 100
+    percent > 100
+      ? "#dc2626"
+      : percent >= 100
       ? "var(--color-status-completed)"
       : percent > 0
         ? "var(--color-status-pending)"
@@ -39,7 +43,7 @@ function ProgressRing({ percent }: { percent: number }) {
     <div
       className="flex h-9 w-9 items-center justify-center rounded-full border-[1.5px] border-[#d3cbb9] text-[9px] font-bold text-brand-navy"
       style={{
-        background: `conic-gradient(${color} ${percent * 3.6}deg, #efebe2 ${percent * 3.6}deg 360deg)`,
+        background: `conic-gradient(${color} ${Math.min(percent, 100) * 3.6}deg, #efebe2 ${Math.min(percent, 100) * 3.6}deg 360deg)`,
       }}
     >
       <span className="flex h-6 w-6 items-center justify-center rounded-full bg-white">
@@ -67,17 +71,24 @@ export function LogReceivingForm({
   const [state, formAction, isPending] = useActionState(logReceiving, initialState);
   const today = useToday();
   const [formKey, setFormKey] = useState(0);
+  const [quantity, setQuantity] = useState("");
 
   // Same render-time reset pattern as NewOrderForm — see the comment
   // there for why this runs during render instead of in a useEffect.
   const [prevState, setPrevState] = useState(state);
   if (state !== prevState) {
     setPrevState(state);
-    if (state.success) setFormKey((k) => k + 1);
+    if (state.success) {
+      setFormKey((k) => k + 1);
+      setQuantity("");
+    }
   }
 
-  const percent = Math.min(100, Math.round((receivedSoFar / quantityOrdered) * 100));
-  const isDone = remainingQuantity <= 0;
+  const percent = Math.round((receivedSoFar / quantityOrdered) * 100);
+  // Over-receiving is allowed (vendors do send extra) — warned, not blocked.
+  const overBy = Number(quantity) - Math.max(remainingQuantity, 0);
+  const inputClass =
+    "w-full rounded-lg border border-brand-input-border px-2.5 py-2 text-xs text-brand-navy placeholder:text-gray-400 focus:border-brand-gold focus:outline-none focus:ring-2 focus:ring-brand-gold/40";
 
   return (
     <form key={formKey} action={formAction} className={ROW_GRID}>
@@ -92,9 +103,16 @@ export function LogReceivingForm({
             <span className="font-normal text-gray-400">({itemUnit})</span>
           )}
         </div>
+        <OverReceivedBadge
+          ordered={quantityOrdered}
+          received={receivedSoFar}
+          unit={itemUnit ?? ""}
+        />
       </div>
 
-      <div className="text-xs text-[#6b7280]">
+      <div
+        className={`text-xs ${receivedSoFar > quantityOrdered ? "font-bold text-red-700" : "text-[#6b7280]"}`}
+      >
         {quantityOrdered} / {receivedSoFar}
       </div>
 
@@ -103,11 +121,11 @@ export function LogReceivingForm({
         type="number"
         step="0.01"
         min="0.01"
-        max={remainingQuantity}
-        placeholder={isDone ? "—" : "Qty"}
-        disabled={isDone}
+        placeholder={remainingQuantity > 0 ? `Qty (${remainingQuantity} left)` : "Extra qty"}
+        value={quantity}
+        onChange={(e) => setQuantity(e.target.value)}
         required
-        className="w-full rounded-lg border border-brand-input-border px-2.5 py-2 text-xs text-brand-navy focus:border-brand-gold focus:outline-none focus:ring-2 focus:ring-brand-gold/40 disabled:bg-gray-50 disabled:text-gray-300"
+        className={`${inputClass} ${overBy > 0 ? "border-red-400 bg-red-50" : ""}`}
       />
 
       <input
@@ -117,31 +135,28 @@ export function LogReceivingForm({
         // Deliveries can't be logged ahead of time — future days are greyed
         // out in the picker (also enforced in logReceiving and the DB).
         max={today}
-        disabled={isDone}
         required
-        className="w-full rounded-lg border border-brand-input-border px-2.5 py-2 text-xs text-brand-navy focus:border-brand-gold focus:outline-none focus:ring-2 focus:ring-brand-gold/40 disabled:bg-gray-50 disabled:text-gray-300"
+        className={inputClass}
       />
 
       <input
         name="invoice_number"
         type="text"
-        placeholder={isDone ? "—" : "Invoice #"}
-        disabled={isDone}
-        required={!isDone}
-        className="w-full rounded-lg border border-brand-input-border px-2.5 py-2 text-xs text-brand-navy placeholder:text-gray-400 focus:border-brand-gold focus:outline-none focus:ring-2 focus:ring-brand-gold/40 disabled:bg-gray-50 disabled:text-gray-300"
+        placeholder="Invoice #"
+        required
+        className={inputClass}
       />
 
       <input
         name="condition_notes"
         type="text"
-        placeholder={isDone ? "—" : "Notes"}
-        disabled={isDone}
-        className="w-full rounded-lg border border-brand-input-border px-2.5 py-2 text-xs text-brand-navy placeholder:text-gray-400 focus:border-brand-gold focus:outline-none focus:ring-2 focus:ring-brand-gold/40 disabled:bg-gray-50 disabled:text-gray-300"
+        placeholder="Notes"
+        className={inputClass}
       />
 
       <button
         type="submit"
-        disabled={isPending || isDone}
+        disabled={isPending}
         aria-busy={isPending || undefined}
         className="inline-flex items-center gap-1.5 rounded-full border border-brand-navy px-3.5 py-2 text-xs font-bold text-brand-navy hover:bg-brand-navy hover:text-white disabled:cursor-not-allowed disabled:border-gray-200 disabled:text-gray-300 disabled:hover:bg-transparent"
       >
@@ -154,6 +169,17 @@ export function LogReceivingForm({
           "Log"
         )}
       </button>
+
+      {overBy > 0 && (
+        <p className="col-span-full rounded-lg border border-red-300 bg-red-50 px-3 py-2 text-xs font-bold text-red-700">
+          ▲ This is {Number(overBy.toFixed(2))} {itemUnit} more than ordered
+          {remainingQuantity > 0
+            ? ` (only ${remainingQuantity} ${itemUnit} left to receive)`
+            : " — this line is already fully received"}
+          . You can still log it; it will be flagged as over-received for the order and
+          approval teams.
+        </p>
+      )}
 
       {state.error && (
         <p className="col-span-full rounded-lg bg-red-50 px-3 py-2 text-xs font-medium text-red-700">

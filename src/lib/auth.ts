@@ -22,6 +22,8 @@ export type CurrentUser = {
   email: string | null;
   isAdmin: boolean;
   siteAssignments: SiteAssignment[];
+  /** Every site this user can open (all of them for Admin), by name. */
+  sites: { id: string; name: string; location: string | null }[];
 };
 
 type UserSiteRow = {
@@ -44,8 +46,9 @@ function siteName(sites: UserSiteRow["sites"]): string {
  * Wrapped in React cache() so the layout and the page share one lookup per
  * request instead of each repeating it. getClaims() verifies the session
  * JWT (locally, when the project uses asymmetric signing keys) rather than
- * always round-tripping to the Auth server, and the profile and site
- * lookups run in parallel.
+ * always round-tripping to the Auth server, and the profile, assignment
+ * and site-list lookups all run in parallel — one round trip to the
+ * database instead of several in a row.
  */
 export const getCurrentUser = cache(async (): Promise<CurrentUser | null> => {
   const supabase = await createClient();
@@ -54,7 +57,7 @@ export const getCurrentUser = cache(async (): Promise<CurrentUser | null> => {
 
   if (!userId) return null;
 
-  const [{ data: profile }, { data: assignments }] = await Promise.all([
+  const [{ data: profile }, { data: assignments }, { data: sites }] = await Promise.all([
     supabase
       .from("profiles")
       .select("id, full_name, email, is_admin, is_active")
@@ -64,6 +67,9 @@ export const getCurrentUser = cache(async (): Promise<CurrentUser | null> => {
       .from("user_sites")
       .select("site_id, role, sites ( name )")
       .eq("user_id", userId),
+    // RLS already limits this to the user's own sites (all sites for
+    // Admin), so the same query serves both.
+    supabase.from("sites").select("id, name, location").order("name"),
   ]);
 
   if (!profile || !profile.is_active) return null;
@@ -82,6 +88,7 @@ export const getCurrentUser = cache(async (): Promise<CurrentUser | null> => {
     email: profile.email,
     isAdmin: profile.is_admin,
     siteAssignments,
+    sites: sites ?? [],
   };
 });
 

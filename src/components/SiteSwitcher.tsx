@@ -7,7 +7,7 @@ type Site = { id: string; name: string };
 
 /**
  * Dropdown that switches the current page's ?site= query param. Shared
- * across the per-site screens (Orders, Receiving, Approvals, Release) so
+ * across the per-site screens (Orders, Receiving, Approvals, Release, Stock) so
  * users assigned to multiple sites can flip between them.
  *
  * Also remembers whichever site is showing in the selected_site cookie

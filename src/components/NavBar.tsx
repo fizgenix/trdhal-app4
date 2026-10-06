@@ -42,6 +42,7 @@ export function NavBar({
         { href: "/receiving", label: "Receiving" },
         { href: "/approvals", label: "Approvals" },
         { href: "/release", label: "Release" },
+        { href: "/inventory", label: "Stock" },
       ]
     : [];
 

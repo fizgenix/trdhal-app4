@@ -7,7 +7,22 @@ import { Button } from "@/components/ui/Button";
 
 const initialState: ApprovalFormState = { error: null, success: null };
 
-export function ApproveOrderForm({ orderId }: { orderId: string }) {
+/**
+ * One approval action on a line: approve what's been received but not yet
+ * approved, or (`closeShort`) accept a short delivery as final and close
+ * the line — remarks are required for that.
+ */
+export function ApproveOrderForm({
+  orderId,
+  closeShort = false,
+  label,
+  remarksPlaceholder = "e.g. matches delivery challan, all good",
+}: {
+  orderId: string;
+  closeShort?: boolean;
+  label: string;
+  remarksPlaceholder?: string;
+}) {
   const [state, formAction, isPending] = useActionState(approveOrder, initialState);
   const [formKey, setFormKey] = useState(0);
 
@@ -19,21 +34,20 @@ export function ApproveOrderForm({ orderId }: { orderId: string }) {
   }
 
   return (
-    <form
-      key={formKey}
-      action={formAction}
-      className="mt-4 flex flex-wrap items-end gap-3 border-t border-brand-border-soft pt-4"
-    >
+    <form key={formKey} action={formAction} className="flex flex-wrap items-end gap-3">
       <input type="hidden" name="order_id" value={orderId} />
+      <input type="hidden" name="close_short" value={String(closeShort)} />
       <div className="min-w-56 flex-1">
         <Field
-          label="Remarks (optional)"
+          label={closeShort ? "Reason for closing short (required)" : "Remarks (optional)"}
+          id={`${closeShort ? "short" : "approve"}-remarks-${orderId}`}
           name="remarks"
-          placeholder="e.g. matches delivery challan, all good"
+          placeholder={remarksPlaceholder}
+          required={closeShort}
         />
       </div>
-      <Button type="submit" loading={isPending}>
-        {isPending ? "Approving… please wait" : "Approve order"}
+      <Button type="submit" variant={closeShort ? "danger" : "primary"} loading={isPending}>
+        {isPending ? "Saving… please wait" : label}
       </Button>
 
       {state.error && (

@@ -12,38 +12,49 @@ What's here:
   with a role (Ordering / Receiving / Accounts)
 - A dashboard showing each user their assigned site(s), linking into
   Orders for that site
-- **Orders**: HO1 (or Admin) places an order — item, quantity, vendor —
-  at their site, with Item and Vendor as type-to-search fields with an
-  inline "+ Add new…" option, so a first-time material or supplier doesn't
-  need a separate trip to a master-data screen. Every order gets a
-  **PO Number** auto-assigned at placement (shown on the form before you
-  submit, in the confirmation, and on the order afterward) — no app code
-  generates it, a Postgres sequence does, so it's race-free under
-  concurrent orders. Anyone assigned to the site (any role) can see the
-  order list and its status badge; the order's own creator (or Admin) can
-  edit the quantity or cancel it, but only while it's still in the
-  `Placed` state — every edit/cancel is logged and shown under a
-  "History" disclosure on the order, and stays visible even if you later
-  can't edit it. A search box filters the list by item or vendor name.
+- **Orders**: HO1 (or Admin) places a purchase order — PO number, vendor,
+  and one or more item lines, each with its own quantity and unit (e.g.
+  pipe in Rmtr and bends in Dozen on the same PO). Item, Unit and Vendor
+  are type-to-search fields with an inline "+ Add new…" option, so a
+  first-time material or supplier doesn't need a separate trip to a
+  master-data screen. Each line is received and approved on its own; the
+  PO's status badge is derived from its lines. Anyone assigned to the site
+  (any role) can see the PO list; the PO's own creator (or Admin) can edit
+  a line's quantity or remove a line while that line is still `Placed`,
+  add a forgotten item while the PO is open, or cancel the whole PO while
+  nothing on it has been received — every change is logged and shown
+  under a "History" disclosure on the PO. A search box filters the list by
+  PO number, item or vendor name.
 - **Receiving**: HO2 (or Admin) sees a site's open orders (`Placed` or
   `Pending Approval`) and logs a delivery against one — quantity, date,
   **invoice number** (required — the vendor's own invoice reference),
   optional condition/quality notes. Multiple entries per order are fine
-  (partial deliveries); the first entry on an order automatically moves it
+  (partial deliveries), and a delivery may exceed what was ordered — it's
+  allowed but flagged "Over-received" in red on the Orders (with its own
+  tab), Receiving and Approvals pages; the first entry on an order automatically moves it
   from `Placed` to `Pending Approval`. Receiving entries are append-only —
   there's no edit/undo in v1, matching the same choice already made for
   Inventory Releases. Both the Orders and Receiving pages now show
   "ordered vs. received so far" for each order, and every invoice number
   logged against it.
-- **Approvals**: HO3 (or Admin) sees a site's `Pending Approval` orders
-  with the full receiving log laid out against the ordered quantity —
-  every delivery, who logged it, when, and any condition notes. Approving
-  is only available once the received total meets or exceeds what was
-  ordered (per your answer that a short delivery can't be approved); until
-  then the order shows "waiting on X of Y". Approving closes the order to
-  `Completed` and records optional remarks — the Orders page now shows who
-  approved a completed order, when, and any remarks, so the full
-  ordered/received/approved history stays visible in one place.
+- **Approvals**: HO3 (or Admin) sees a site's `Pending Approval` items,
+  grouped by PO, with the full receiving log and earlier approvals laid
+  out against the ordered quantity. HO3 can approve whatever's been
+  received so far without waiting for the rest — the item stays open
+  (shown as `Partly Approved`) and completes once it's fully received and
+  approved. If the rest isn't coming, HO3 can **close it short**: accept
+  what was received as final, with a required remark; it's then flagged
+  "Short-closed" on the Orders page. Every approval (quantity, who, when,
+  remarks) is shown on the Orders page.
+- **Stock Inventory** (the **Stock** tab): everyone at a site can see its
+  stock per item + unit — approved in, released, and in stock now — and
+  expand any item for a dated ledger with a running balance: every HO3
+  approval coming in (PO number, vendor, invoices, over-received /
+  short-closed flags) and every release going out (building, notes, who).
+  Fuzzy search by item or PO number, a date range (with opening balance),
+  an out-of-stock toggle, and a **Download Excel** button that exports
+  exactly what's on screen. Stock counts only *approved* quantity, so the
+  Release tab can only release what HO3 has approved.
 - **Inventory Release**: HO2 (or Admin) sees current stock at their site
   (received minus already released, per item) and releases some of it to
   a building — quantity, destination (dropdown with inline "+ Add a new
@@ -192,6 +203,14 @@ supabase/migrations/
   0005_release.sql             release_inventory() function + inventory_releases RLS
   0006_receiving_quantity_cap.sql  Bug fix: caps a delivery at what's still outstanding
   0007_po_invoice_numbers.sql  orders.po_number (auto) + receiving_logs.invoice_number
+  0008_manual_po_number.sql    PO number entered by HO1 instead of auto-assigned
+  0009_received_date_not_future.sql  Received date can't be in the future
+  0010_standard_units.sql      Normalises saved item units
+  0011_unit_per_order.sql      Unit lives on each order; stock tracked per item + unit
+  0012_purchase_orders.sql     Multi-item POs: purchase_orders header, orders become PO lines
+  0013_allow_over_receiving.sql  Deliveries may exceed the ordered qty (flagged in the app)
+  0014_partial_approvals.sql   Approve in batches as deliveries arrive, or close a line short
+  0015_stock_from_approvals.sql  Stock = approved − released; Release limited to approved stock
 ```
 
 Three of the original five migrations (`log_receiving`, `approve_order`,

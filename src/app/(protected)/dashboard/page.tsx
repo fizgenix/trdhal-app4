@@ -10,7 +10,7 @@ type SiteCard = {
   roles: string[];
 };
 
-type OrderStatusRow = { site_id: string; status: OrderStatus };
+type OrderStatusRow = { site_id: string; purchase_order_id: string; status: OrderStatus };
 
 export default async function DashboardPage() {
   const user = await requireUser();
@@ -19,11 +19,7 @@ export default async function DashboardPage() {
   let sites: SiteCard[] = [];
 
   if (user.isAdmin) {
-    const { data } = await supabase
-      .from("sites")
-      .select("id, name, location")
-      .order("name");
-    sites = (data ?? []).map((s) => ({ ...s, roles: ["Admin — full access"] }));
+    sites = user.sites.map((s) => ({ ...s, roles: ["Admin — full access"] }));
   } else {
     const bySite = new Map<string, SiteCard>();
     for (const a of user.siteAssignments) {
@@ -48,15 +44,19 @@ export default async function DashboardPage() {
     siteIds.length > 0
       ? await supabase
           .from("orders")
-          .select("site_id, status")
+          .select("site_id, purchase_order_id, status")
           .in("site_id", siteIds)
           .in("status", ["placed", "pending_approval"])
       : { data: [] as OrderStatusRow[] };
 
-  const openOrdersBySite = new Map<string, number>();
+  // Open orders counts POs (one PO can have several open lines); needs
+  // approval counts lines, since each line is approved on its own.
+  const openPosBySite = new Map<string, Set<string>>();
   const needsApprovalBySite = new Map<string, number>();
   for (const row of (orderStatusData ?? []) as OrderStatusRow[]) {
-    openOrdersBySite.set(row.site_id, (openOrdersBySite.get(row.site_id) ?? 0) + 1);
+    const pos = openPosBySite.get(row.site_id) ?? new Set<string>();
+    pos.add(row.purchase_order_id);
+    openPosBySite.set(row.site_id, pos);
     if (row.status === "pending_approval") {
       needsApprovalBySite.set(
         row.site_id,
@@ -88,7 +88,7 @@ export default async function DashboardPage() {
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {sites.map((site) => {
-          const openOrders = openOrdersBySite.get(site.id) ?? 0;
+          const openOrders = openPosBySite.get(site.id)?.size ?? 0;
           const needsApproval = needsApprovalBySite.get(site.id) ?? 0;
 
           return (

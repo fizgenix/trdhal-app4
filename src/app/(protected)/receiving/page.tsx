@@ -4,18 +4,26 @@ import { SiteSwitcher } from "@/components/SiteSwitcher";
 import { resolveSelectedSiteId } from "@/lib/selected-site";
 import { StatusBadge } from "@/components/StatusBadge";
 import { LogReceivingForm } from "./LogReceivingForm";
+import { OverReceivedBadge } from "@/components/OverReceivedBadge";
 import type { OrderStatus } from "@/types/database";
 
 type Rel<T> = T | T[] | null;
 
+/** One open item line of a PO. */
 type OpenOrderRow = {
   id: string;
+  purchase_order_id: string;
   quantity_ordered: number;
   status: OrderStatus;
-  placed_date: string;
-  /** The order's own unit — receiving and approval stay in it. */
+  /** The line's own unit — receiving and approval stay in it. */
   unit: string;
   items: Rel<{ name: string }>;
+};
+
+type PurchaseOrderRow = {
+  id: string;
+  po_number: string;
+  placed_date: string;
   shopkeepers: Rel<{ name: string }>;
   profiles: Rel<{ full_name: string }>;
 };
@@ -52,15 +60,7 @@ export default async function ReceivingPage({
   const { site: siteParam } = await searchParams;
   const supabase = await createClient();
 
-  let sites: { id: string; name: string }[] = [];
-  if (user.isAdmin) {
-    const { data } = await supabase.from("sites").select("id, name").order("name");
-    sites = data ?? [];
-  } else {
-    const map = new Map<string, string>();
-    user.siteAssignments.forEach((a) => map.set(a.site_id, a.site_name));
-    sites = Array.from(map, ([id, name]) => ({ id, name }));
-  }
+  const sites = user.sites;
 
   if (sites.length === 0) {
     return (
@@ -79,28 +79,46 @@ export default async function ReceivingPage({
       (a) => a.site_id === selectedSiteId && a.role === "ho2_receiving",
     );
 
-  const { data: ordersData } = await supabase
-    .from("orders")
-    .select(
-      "id, quantity_ordered, unit, status, placed_date, items ( name ), shopkeepers ( name ), profiles ( full_name )",
-    )
-    .eq("site_id", selectedSiteId)
-    .in("status", ["placed", "pending_approval"])
-    .order("placed_date", { ascending: false });
+  const OPEN_STATUSES = ["placed", "pending_approval"];
+
+  // One parallel batch: logs and POs are filtered by site and status
+  // through their order lines (`orders!inner`) instead of by a list of
+  // ids, so nothing waits on the order list first — each extra wait is a
+  // full round trip to the database.
+  const [{ data: ordersData }, { data: logsData }, { data: posData }] = await Promise.all([
+    // Lines oldest-first, so they list in the order entered on the PO.
+    supabase
+      .from("orders")
+      .select("id, purchase_order_id, quantity_ordered, unit, status, items ( name )")
+      .eq("site_id", selectedSiteId)
+      .in("status", OPEN_STATUSES)
+      .order("created_at"),
+    supabase
+      .from("receiving_logs")
+      .select(
+        "id, order_id, quantity_received, condition_notes, invoice_number, received_date, profiles ( full_name ), orders!inner ( site_id, status )",
+      )
+      .eq("orders.site_id", selectedSiteId)
+      .in("orders.status", OPEN_STATUSES)
+      .order("received_date", { ascending: false }),
+    supabase
+      .from("purchase_orders")
+      .select("id, po_number, placed_date, shopkeepers ( name ), profiles ( full_name ), orders!inner ( status )")
+      .eq("site_id", selectedSiteId)
+      .in("orders.status", OPEN_STATUSES)
+      .order("placed_date", { ascending: false }),
+  ]);
 
   const openOrders = (ordersData ?? []) as unknown as OpenOrderRow[];
-  const orderIds = openOrders.map((o) => o.id);
 
-  const { data: logsData } =
-    orderIds.length > 0
-      ? await supabase
-          .from("receiving_logs")
-          .select(
-            "id, order_id, quantity_received, condition_notes, invoice_number, received_date, profiles ( full_name )",
-          )
-          .in("order_id", orderIds)
-          .order("received_date", { ascending: false })
-      : { data: [] as ReceivingLogRow[] };
+  // Open lines grouped under their PO, newest PO first.
+  const purchaseOrders = (posData ?? []) as unknown as PurchaseOrderRow[];
+  const linesByPo = new Map<string, OpenOrderRow[]>();
+  for (const order of openOrders) {
+    const list = linesByPo.get(order.purchase_order_id) ?? [];
+    list.push(order);
+    linesByPo.set(order.purchase_order_id, list);
+  }
 
   const logs = (logsData ?? []) as unknown as ReceivingLogRow[];
   const logsByOrder = new Map<string, ReceivingLogRow[]>();
@@ -121,7 +139,7 @@ export default async function ReceivingPage({
         <div>
           <h1 className="text-2xl font-extrabold text-brand-navy">Receiving</h1>
           <p className="text-[#6b7280]">
-            Log deliveries against open orders — partial deliveries are fine.
+            Log deliveries against open orders — partial deliveries are fine, and extra quantity is allowed but flagged.
           </p>
         </div>
         {sites.length > 1 && (
@@ -155,64 +173,86 @@ export default async function ReceivingPage({
             </div>
           )}
 
-          <div className="divide-y divide-brand-border-soft">
-            {openOrders.map((order) => {
-              const item = one(order.items);
-              const shopkeeper = one(order.shopkeepers);
-              const placedByProfile = one(order.profiles);
-              const receivedSoFar = receivedTotalByOrder.get(order.id) ?? 0;
-              const orderLogs = logsByOrder.get(order.id) ?? [];
+          <div className="divide-y divide-brand-border">
+            {purchaseOrders.map((po) => {
+              const shopkeeper = one(po.shopkeepers);
+              const placedByProfile = one(po.profiles);
 
               return (
-                <div key={order.id} className="px-1 py-2 sm:px-0 sm:py-0">
-                  <div className="flex flex-wrap items-center justify-between gap-2 px-4 pt-3 sm:hidden">
-                    <p className="text-sm font-bold text-brand-navy">
-                      {item?.name ?? "Unknown item"}
-                    </p>
-                    <StatusBadge status={order.status} />
+                <div key={po.id}>
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1 bg-[#fbfaf6] px-5 py-2.5">
+                    <span className="rounded-full border border-brand-border bg-brand-cream px-2.5 py-0.5 font-mono text-[12px] font-bold text-brand-navy">
+                      {po.po_number}
+                    </span>
+                    <span className="text-sm font-bold text-brand-navy">
+                      {shopkeeper?.name ?? "Unknown vendor"}
+                    </span>
+                    <span className="text-xs text-[#7b8494]">
+                      Placed by {placedByProfile?.full_name ?? "Unknown"} on{" "}
+                      {formatDate(po.placed_date)}
+                    </span>
                   </div>
-                  <p className="px-4 pb-1 text-xs text-[#7b8494] sm:hidden">
-                    Vendor: {shopkeeper?.name ?? "—"} · Placed by{" "}
-                    {placedByProfile?.full_name ?? "Unknown"} on{" "}
-                    {formatDate(order.placed_date)}
-                  </p>
 
-                  {canReceiveHere ? (
-                    <LogReceivingForm
-                      orderId={order.id}
-                      itemName={item?.name ?? "Unknown item"}
-                      itemUnit={order.unit}
-                      quantityOrdered={order.quantity_ordered}
-                      receivedSoFar={receivedSoFar}
-                      remainingQuantity={order.quantity_ordered - receivedSoFar}
-                    />
-                  ) : (
-                    <div className="flex items-center justify-between gap-3 px-5 py-3.5 text-sm">
-                      <span className="font-bold text-brand-navy">
-                        {item?.name ?? "Unknown item"}{" "}
-                        <span className="font-normal text-[#7b8494]">({order.unit})</span>
-                      </span>
-                      <span className="text-xs text-[#6b7280]">
-                        {order.quantity_ordered} / {receivedSoFar}
-                      </span>
-                    </div>
-                  )}
+                  <div className="divide-y divide-brand-border-soft">
+                    {(linesByPo.get(po.id) ?? []).map((order) => {
+                      const item = one(order.items);
+                      const receivedSoFar = receivedTotalByOrder.get(order.id) ?? 0;
+                      const orderLogs = logsByOrder.get(order.id) ?? [];
 
-                  {orderLogs.length > 0 && (
-                    <p className="px-5 pb-3 text-[11px] text-[#7b8494]">
-                      {item?.name ?? "Item"} — receiving history ({orderLogs.length}):{" "}
-                      {orderLogs
-                        .map((log) => {
-                          const receiver = one(log.profiles);
-                          return `${log.quantity_received} ${order.unit} logged by ${
-                            receiver?.full_name ?? "Unknown"
-                          } on ${formatDate(log.received_date)}${
-                            log.invoice_number ? ` · Invoice ${log.invoice_number}` : ""
-                          }${log.condition_notes ? ` ("${log.condition_notes}")` : ""}`;
-                        })
-                        .join(" · ")}
-                    </p>
-                  )}
+                      return (
+                        <div key={order.id} className="px-1 py-2 sm:px-0 sm:py-0">
+                          <div className="flex flex-wrap items-center justify-between gap-2 px-4 pt-3 sm:hidden">
+                            <p className="text-sm font-bold text-brand-navy">
+                              {item?.name ?? "Unknown item"}
+                            </p>
+                            <StatusBadge status={order.status} />
+                          </div>
+
+                          {canReceiveHere ? (
+                            <LogReceivingForm
+                              orderId={order.id}
+                              itemName={item?.name ?? "Unknown item"}
+                              itemUnit={order.unit}
+                              quantityOrdered={order.quantity_ordered}
+                              receivedSoFar={receivedSoFar}
+                              remainingQuantity={order.quantity_ordered - receivedSoFar}
+                            />
+                          ) : (
+                            <div className="flex items-center justify-between gap-3 px-5 py-3.5 text-sm">
+                              <span className="font-bold text-brand-navy">
+                                {item?.name ?? "Unknown item"}{" "}
+                                <span className="font-normal text-[#7b8494]">({order.unit})</span>
+                              </span>
+                              <span className="flex items-center gap-2 text-xs text-[#6b7280]">
+                                <OverReceivedBadge
+                                  ordered={order.quantity_ordered}
+                                  received={receivedSoFar}
+                                  unit={order.unit}
+                                />
+                                {order.quantity_ordered} / {receivedSoFar}
+                              </span>
+                            </div>
+                          )}
+
+                          {orderLogs.length > 0 && (
+                            <p className="px-5 pb-3 text-[11px] text-[#7b8494]">
+                              {item?.name ?? "Item"} — receiving history ({orderLogs.length}):{" "}
+                              {orderLogs
+                                .map((log) => {
+                                  const receiver = one(log.profiles);
+                                  return `${log.quantity_received} ${order.unit} logged by ${
+                                    receiver?.full_name ?? "Unknown"
+                                  } on ${formatDate(log.received_date)}${
+                                    log.invoice_number ? ` · Invoice ${log.invoice_number}` : ""
+                                  }${log.condition_notes ? ` ("${log.condition_notes}")` : ""}`;
+                                })
+                                .join(" · ")}
+                            </p>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
                 </div>
               );
             })}

@@ -46,15 +46,7 @@ export default async function ReleasePage({
   const { site: siteParam } = await searchParams;
   const supabase = await createClient();
 
-  let sites: { id: string; name: string }[] = [];
-  if (user.isAdmin) {
-    const { data } = await supabase.from("sites").select("id, name").order("name");
-    sites = data ?? [];
-  } else {
-    const map = new Map<string, string>();
-    user.siteAssignments.forEach((a) => map.set(a.site_id, a.site_name));
-    sites = Array.from(map, ([id, name]) => ({ id, name }));
-  }
+  const sites = user.sites;
 
   if (sites.length === 0) {
     return (
@@ -118,7 +110,7 @@ export default async function ReleasePage({
         <div>
           <h1 className="text-2xl font-extrabold text-brand-navy">Inventory Release</h1>
           <p className="text-[#6b7280]">
-            Release stock to a building — deducts from this site&apos;s running inventory.
+            Release approved stock to a building — deducts from this site&apos;s running inventory.
           </p>
         </div>
         {sites.length > 1 && (
@@ -128,10 +120,10 @@ export default async function ReleasePage({
 
       <div className="grid gap-5 lg:grid-cols-[1fr_1.2fr]">
         <div className="rounded-2xl border border-brand-border bg-white p-5 shadow-sm">
-          <CardHeaderBand inset={5}>Current stock</CardHeaderBand>
+          <CardHeaderBand inset={5}>Approved stock</CardHeaderBand>
           {stockItems.length === 0 ? (
             <p className="mt-3 text-sm text-[#7b8494]">
-              No inventory available to release yet — log some receiving first.
+              No approved stock to release yet — items become available once HO3 approves a delivery.
             </p>
           ) : (
             <div className="mt-1 flex flex-col">

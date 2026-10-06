@@ -68,19 +68,30 @@ export type Building = {
   created_at: string;
 };
 
+/** Header shared by every line on a PO (0012_purchase_orders.sql). Status is derived from its lines. */
+export type PurchaseOrder = {
+  id: string;
+  site_id: string;
+  /** Entered manually by HO1 when placing the order (0008_manual_po_number.sql). */
+  po_number: string;
+  shopkeeper_id: string;
+  placed_by: string;
+  placed_date: string;
+  created_at: string;
+};
+
+/** One line (item) of a purchase order — received and approved on its own. */
 export type Order = {
   id: string;
+  purchase_order_id: string;
   site_id: string;
   item_id: string;
   quantity_ordered: number;
   /** Fixed when the order is placed; its receiving and approval stay in this unit (0011_unit_per_order.sql). */
   unit: string;
-  shopkeeper_id: string;
   placed_by: string;
   placed_date: string;
   status: OrderStatus;
-  /** Entered manually by HO1 when placing the order (0008_manual_po_number.sql). */
-  po_number: string;
   created_at: string;
   updated_at: string;
 };
@@ -90,7 +101,7 @@ export type OrderEditLog = {
   order_id: string;
   edited_by: string;
   edited_at: string;
-  action: "edited" | "cancelled";
+  action: "edited" | "cancelled" | "added" | "removed";
   note: string | null;
   previous_values: Record<string, unknown> | null;
 };
@@ -113,6 +124,10 @@ export type Approval = {
   approved_by: string;
   approved_date: string;
   remarks: string | null;
+  /** How much this approval covered — a line can be approved in several batches (0014_partial_approvals.sql). */
+  quantity_approved: number;
+  /** True when HO3 accepted a short delivery as final and closed the line. */
+  closes_short: boolean;
   created_at: string;
 };
 

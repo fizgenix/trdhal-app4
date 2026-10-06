@@ -8,17 +8,23 @@ import { flashToast } from "@/lib/toast";
 
 export type ApprovalFormState = { error: string | null; success: string | null };
 
-const approveOrderSchema = z.object({
-  orderId: z.string().uuid(),
-  remarks: z.string().trim(),
-});
+const approveOrderSchema = z
+  .object({
+    orderId: z.string().uuid(),
+    remarks: z.string().trim(),
+    closeShort: z.boolean(),
+  })
+  .refine((d) => !d.closeShort || d.remarks, {
+    message: "Add a remark explaining why this item is being closed short.",
+  });
 
 /**
- * Approves an order via the approve_order RPC — see
- * supabase/migrations/0004_approvals.sql for why this is one atomic
- * Postgres function (inserting the approval and flipping the order to
- * 'completed' must happen together, and it re-checks received >= ordered
- * server-side rather than trusting the UI's own check).
+ * Approves a line via the approve_order RPC — either everything received
+ * but not yet approved (the line completes once it's fully received), or,
+ * with close_short, accepts a short delivery as final and completes it.
+ * See supabase/migrations/0014_partial_approvals.sql; it's one atomic
+ * Postgres function so the approval insert and the status flip happen
+ * together, and it re-checks the quantities server-side.
  */
 export async function approveOrder(
   _prev: ApprovalFormState,
@@ -29,6 +35,7 @@ export async function approveOrder(
   const parsed = approveOrderSchema.safeParse({
     orderId: formData.get("order_id"),
     remarks: formData.get("remarks") ?? "",
+    closeShort: formData.get("close_short") === "true",
   });
 
   if (!parsed.success) {
@@ -38,12 +45,13 @@ export async function approveOrder(
     };
   }
 
-  const { orderId, remarks } = parsed.data;
+  const { orderId, remarks, closeShort } = parsed.data;
 
   const supabase = await createClient();
   const { error } = await supabase.rpc("approve_order", {
     p_order_id: orderId,
     p_remarks: remarks || null,
+    p_close_short: closeShort,
   });
 
   if (error) {
@@ -53,6 +61,7 @@ export async function approveOrder(
   revalidatePath("/approvals");
   revalidatePath("/orders");
   revalidatePath("/receiving");
-  await flashToast("Order approved and completed.");
-  return { error: null, success: "Order approved and completed." };
+  const success = closeShort ? "Item closed short and completed." : "Approved.";
+  await flashToast(success);
+  return { error: null, success };
 }
