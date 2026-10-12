@@ -1,7 +1,7 @@
 "use client";
 
 import { useActionState, useState } from "react";
-import { approveOrder, type ApprovalFormState } from "./actions";
+import { approveOrder, rejectDirectReceipt, type ApprovalFormState } from "./actions";
 import { Field } from "@/components/ui/Field";
 import { Button } from "@/components/ui/Button";
 
@@ -10,20 +10,27 @@ const initialState: ApprovalFormState = { error: null, success: null };
 /**
  * One approval action on a line: approve what's been received but not yet
  * approved, or (`closeShort`) accept a short delivery as final and close
- * the line — remarks are required for that.
+ * the line — remarks are required for that. `reject` turns down a
+ * direct-receipt line instead (reason required).
  */
 export function ApproveOrderForm({
   orderId,
   closeShort = false,
+  reject = false,
   label,
   remarksPlaceholder = "e.g. matches delivery challan, all good",
 }: {
   orderId: string;
   closeShort?: boolean;
+  reject?: boolean;
   label: string;
   remarksPlaceholder?: string;
 }) {
-  const [state, formAction, isPending] = useActionState(approveOrder, initialState);
+  const [state, formAction, isPending] = useActionState(
+    reject ? rejectDirectReceipt : approveOrder,
+    initialState,
+  );
+  const needsReason = closeShort || reject;
   const [formKey, setFormKey] = useState(0);
 
   // Same render-time reset pattern used by NewOrderForm / LogReceivingForm.
@@ -39,14 +46,20 @@ export function ApproveOrderForm({
       <input type="hidden" name="close_short" value={String(closeShort)} />
       <div className="min-w-56 flex-1">
         <Field
-          label={closeShort ? "Reason for closing short (required)" : "Remarks (optional)"}
-          id={`${closeShort ? "short" : "approve"}-remarks-${orderId}`}
+          label={
+            reject
+              ? "Reason for rejecting (required)"
+              : closeShort
+                ? "Reason for closing short (required)"
+                : "Remarks (optional)"
+          }
+          id={`${reject ? "reject" : closeShort ? "short" : "approve"}-remarks-${orderId}`}
           name="remarks"
           placeholder={remarksPlaceholder}
-          required={closeShort}
+          required={needsReason}
         />
       </div>
-      <Button type="submit" variant={closeShort ? "danger" : "primary"} loading={isPending}>
+      <Button type="submit" variant={needsReason ? "danger" : "primary"} loading={isPending}>
         {isPending ? "Saving… please wait" : label}
       </Button>
 

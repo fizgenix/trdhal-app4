@@ -4,6 +4,7 @@ import { SiteSwitcher } from "@/components/SiteSwitcher";
 import { resolveSelectedSiteId } from "@/lib/selected-site";
 import { StatusBadge } from "@/components/StatusBadge";
 import { LogReceivingForm } from "./LogReceivingForm";
+import { DirectReceiptForm } from "./DirectReceiptForm";
 import { OverReceivedBadge } from "@/components/OverReceivedBadge";
 import type { OrderStatus } from "@/types/database";
 
@@ -26,6 +27,30 @@ type PurchaseOrderRow = {
   placed_date: string;
   shopkeepers: Rel<{ name: string }>;
   profiles: Rel<{ full_name: string }>;
+};
+
+/** A logged direct receipt (no PO) and how each of its items fared at approval. */
+type DirectReceiptRow = {
+  id: string;
+  po_number: string;
+  placed_date: string;
+  shopkeepers: Rel<{ name: string }>;
+  profiles: Rel<{ full_name: string }>;
+  orders: {
+    id: string;
+    quantity_ordered: number;
+    unit: string;
+    status: OrderStatus;
+    items: Rel<{ name: string }>;
+    order_edit_log: { action: string; note: string | null }[];
+  }[];
+};
+
+const DIRECT_STATUS: Record<OrderStatus, { label: string; className: string }> = {
+  placed: { label: "Pending", className: "bg-orange-100 text-orange-800" },
+  pending_approval: { label: "Pending approval", className: "bg-orange-100 text-orange-800" },
+  completed: { label: "Approved", className: "bg-green-100 text-green-800" },
+  cancelled: { label: "Rejected", className: "bg-red-100 text-red-700" },
 };
 
 type ReceivingLogRow = {
@@ -85,12 +110,22 @@ export default async function ReceivingPage({
   // through their order lines (`orders!inner`) instead of by a list of
   // ids, so nothing waits on the order list first — each extra wait is a
   // full round trip to the database.
-  const [{ data: ordersData }, { data: logsData }, { data: posData }] = await Promise.all([
+  // Direct receipts (MISC- POs) aren't received against here — they're
+  // already received when logged — so only real POs ('po') are listed.
+  const [
+    { data: ordersData },
+    { data: logsData },
+    { data: posData },
+    { data: directData },
+    { data: itemsData },
+    { data: shopkeepersData },
+  ] = await Promise.all([
     // Lines oldest-first, so they list in the order entered on the PO.
     supabase
       .from("orders")
-      .select("id, purchase_order_id, quantity_ordered, unit, status, items ( name )")
+      .select("id, purchase_order_id, quantity_ordered, unit, status, items ( name ), purchase_orders!inner ( kind )")
       .eq("site_id", selectedSiteId)
+      .eq("purchase_orders.kind", "po")
       .in("status", OPEN_STATUSES)
       .order("created_at"),
     supabase
@@ -105,9 +140,27 @@ export default async function ReceivingPage({
       .from("purchase_orders")
       .select("id, po_number, placed_date, shopkeepers ( name ), profiles ( full_name ), orders!inner ( status )")
       .eq("site_id", selectedSiteId)
+      .eq("kind", "po")
       .in("orders.status", OPEN_STATUSES)
       .order("placed_date", { ascending: false }),
+    supabase
+      .from("purchase_orders")
+      .select(
+        "id, po_number, placed_date, shopkeepers ( name ), profiles ( full_name ), orders ( id, quantity_ordered, unit, status, items ( name ), order_edit_log ( action, note ) )",
+      )
+      .eq("site_id", selectedSiteId)
+      .eq("kind", "direct")
+      .order("placed_date", { ascending: false })
+      .limit(15),
+    canReceiveHere
+      ? supabase.from("items").select("id, name, unit").order("name")
+      : Promise.resolve({ data: [] }),
+    canReceiveHere
+      ? supabase.from("shopkeepers").select("id, name").order("name")
+      : Promise.resolve({ data: [] }),
   ]);
+
+  const directReceipts = (directData ?? []) as unknown as DirectReceiptRow[];
 
   const openOrders = (ordersData ?? []) as unknown as OpenOrderRow[];
 
@@ -152,6 +205,22 @@ export default async function ReceivingPage({
           You have view-only access at this site. Only Receiving (HO2) users can log
           deliveries.
         </p>
+      )}
+
+      {canReceiveHere && (
+        <details className="group">
+          <summary className="inline-flex cursor-pointer list-none items-center gap-2 rounded-full border border-dashed border-brand-navy px-4 py-2 text-sm font-bold text-brand-navy hover:bg-brand-cream">
+            <span className="group-open:hidden">+ Direct Receipt</span>
+            <span className="hidden group-open:inline">− Hide Direct Receipt</span>
+          </summary>
+          <div className="mt-4">
+            <DirectReceiptForm
+              siteId={selectedSiteId}
+              items={(itemsData ?? []) as { id: string; name: string; unit: string }[]}
+              shopkeepers={(shopkeepersData ?? []) as { id: string; name: string }[]}
+            />
+          </div>
+        </details>
       )}
 
       {openOrders.length === 0 ? (
@@ -258,6 +327,50 @@ export default async function ReceivingPage({
             })}
           </div>
         </div>
+      )}
+
+      {directReceipts.length > 0 && (
+        <section className="flex flex-col gap-3">
+          <h2 className="text-lg font-extrabold text-brand-navy">Recent Direct Receipts</h2>
+          <div className="divide-y divide-brand-border overflow-hidden rounded-2xl border border-brand-border bg-white shadow-sm">
+            {directReceipts.map((receipt) => (
+              <div key={receipt.id} className="flex flex-col gap-2 px-5 py-3.5">
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                  <span className="rounded-full border border-brand-border bg-brand-cream px-2.5 py-0.5 font-mono text-[12px] font-bold text-brand-navy">
+                    {receipt.po_number}
+                  </span>
+                  <span className="text-sm font-bold text-brand-navy">
+                    {one(receipt.shopkeepers)?.name ?? "No vendor"}
+                  </span>
+                  <span className="text-xs text-[#7b8494]">
+                    Logged by {one(receipt.profiles)?.full_name ?? "Unknown"} on{" "}
+                    {formatDate(receipt.placed_date)}
+                  </span>
+                </div>
+                <ul className="flex flex-col gap-1 text-sm text-[#4b5563]">
+                  {receipt.orders.map((line) => {
+                    const status = DIRECT_STATUS[line.status];
+                    const rejection = line.order_edit_log.find((l) => l.action === "rejected");
+                    return (
+                      <li key={line.id} className="flex flex-wrap items-center gap-2">
+                        <span>
+                          {one(line.items)?.name ?? "Unknown item"} — {line.quantity_ordered}{" "}
+                          {line.unit}
+                        </span>
+                        <span className={`rounded-full px-2 py-0.5 text-[11px] font-bold ${status.className}`}>
+                          {status.label}
+                        </span>
+                        {rejection?.note && (
+                          <span className="text-xs text-red-700">Reason: {rejection.note}</span>
+                        )}
+                      </li>
+                    );
+                  })}
+                </ul>
+              </div>
+            ))}
+          </div>
+        </section>
       )}
     </div>
   );

@@ -23,6 +23,9 @@ export const NEW_ID = "__new__";
  *   "Did you mean …?" and the form won't submit until they pick the
  *   existing one or confirm the new one. That's what stops typos turning
  *   into duplicate entries.
+ * - With `allowNew={false}` (e.g. releasing stock, which must already
+ *   exist) there's no add-new row: the user has to pick a listed option,
+ *   and the form won't submit until they do.
  */
 export function SearchableSelect({
   label,
@@ -36,11 +39,12 @@ export function SearchableSelect({
   initial,
   canonicalize = (s) => s,
   onSelect,
+  allowNew = true,
 }: {
   label: string;
   name: string;
   /** Form field that carries the typed name when a new entry is chosen. */
-  newNameField: string;
+  newNameField?: string;
   /** "item" / "vendor" — used in the add-new and did-you-mean wording. */
   noun: string;
   options: Option[];
@@ -60,6 +64,8 @@ export function SearchableSelect({
    * text no longer matches a selection) and the text now in the box.
    */
   onSelect?: (id: string, text: string) => void;
+  /** false = only existing options can be picked; no "+ Add …" row. */
+  allowNew?: boolean;
 }) {
   const fieldId = useId();
   const listId = `${fieldId}-list`;
@@ -72,18 +78,19 @@ export function SearchableSelect({
   const [highlight, setHighlight] = useState<number | null>(null);
 
   const typed = query.trim();
-  const exact = typed
-    ? options.find(
+  const exactMatches = typed
+    ? options.filter(
         (o) => normalizeName(canonicalize(o.name)) === normalizeName(canonicalize(typed)),
       )
-    : undefined;
+    : [];
+  const exact = exactMatches[0];
   const ranked = typed
     ? rankMatches(typed, options, (o) => o.name)
     : options.map((option) => ({ option, score: 0 }));
-  const similar = exact ? [] : ranked.filter((r) => r.score >= SIMILAR_THRESHOLD);
+  const similar = exact || !allowNew ? [] : ranked.filter((r) => r.score >= SIMILAR_THRESHOLD);
 
   const addNewRow: Row | null =
-    typed && !exact ? { id: NEW_ID, label: `+ Add “${typed}” as a new ${noun}`, isAddNew: true } : null;
+    allowNew && typed && !exact ? { id: NEW_ID, label: `+ Add “${typed}” as a new ${noun}`, isAddNew: true } : null;
   const rows: Row[] = [...(addNewRow ? [addNewRow] : []), ...ranked.map((r) => r.option)];
 
   // Unless the user has arrowed/hovered somewhere, highlight the best
@@ -94,15 +101,19 @@ export function SearchableSelect({
   // Typed text that hasn't been resolved to an existing or a confirmed-new
   // entry, and looks like a typo of something saved — block submission.
   const needsConfirm = !!typed && !selectedId && similar.length > 0;
+  // Without add-new, any typed text that isn't a picked option blocks submission.
+  const needsPick = !allowNew && !!typed && !selectedId;
 
   const closestName = similar[0]?.option.name;
   useLayoutEffect(() => {
     inputRef.current?.setCustomValidity(
       needsConfirm
         ? `“${typed}” looks like “${closestName}”. Pick it, or confirm “${typed}” as a new ${noun}.`
-        : "",
+        : needsPick
+          ? `Pick a ${noun} from the list.`
+          : "",
     );
-  }, [needsConfirm, typed, closestName, noun]);
+  }, [needsConfirm, needsPick, typed, closestName, noun]);
 
   function select(id: string, text: string) {
     setSelectedId(id);
@@ -119,6 +130,11 @@ export function SearchableSelect({
   /** On leaving the field with unresolved text: use an exact match, auto-add if nothing's close, else leave it for the did-you-mean prompt. */
   function resolveTyped() {
     if (selectedId || !typed) return;
+    if (!allowNew) {
+      // Only auto-pick when the name is unambiguous (stock can list one item in several units).
+      if (exactMatches.length === 1) select(exact.id, exact.label);
+      return;
+    }
     if (exact) select(exact.id, exact.label);
     else if (similar.length === 0) select(NEW_ID, typed);
   }
@@ -186,7 +202,9 @@ export function SearchableSelect({
         className="rounded-[10px] border border-brand-input-border px-3.5 py-2.5 text-[15px] text-brand-navy placeholder:text-gray-400 focus:border-brand-gold focus:outline-none focus:ring-2 focus:ring-brand-gold/40"
       />
       <input type="hidden" name={name} value={selectedId} />
-      <input type="hidden" name={newNameField} value={selectedId === NEW_ID ? typed : ""} />
+      {newNameField && (
+        <input type="hidden" name={newNameField} value={selectedId === NEW_ID ? typed : ""} />
+      )}
 
       {selectedId === NEW_ID && (
         <p className="text-xs text-[#7b8494]">
@@ -232,8 +250,11 @@ export function SearchableSelect({
         >
           {!typed && (
             <li className="px-3.5 py-2 text-xs text-[#7b8494]">
-              Type to search — or type a new name to add it.
+              {allowNew ? "Type to search — or type a new name to add it." : "Type to search."}
             </li>
+          )}
+          {typed && rows.length === 0 && (
+            <li className="px-3.5 py-2 text-xs text-[#7b8494]">No matching {noun}s.</li>
           )}
           {rows.map((row, i) => (
             <li key={row.id} role="option" aria-selected={row.id === selectedId}>

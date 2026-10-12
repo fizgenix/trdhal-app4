@@ -74,7 +74,10 @@ export type PurchaseOrder = {
   site_id: string;
   /** Entered manually by HO1 when placing the order (0008_manual_po_number.sql). */
   po_number: string;
-  shopkeeper_id: string;
+  /** 'direct' = misc items HO2 logged with no PO, numbered MISC-0001… (0016_direct_receipts.sql). */
+  kind: "po" | "direct";
+  /** Always set on a 'po'; optional on a 'direct' receipt. */
+  shopkeeper_id: string | null;
   placed_by: string;
   placed_date: string;
   created_at: string;
@@ -101,7 +104,7 @@ export type OrderEditLog = {
   order_id: string;
   edited_by: string;
   edited_at: string;
-  action: "edited" | "cancelled" | "added" | "removed";
+  action: "edited" | "cancelled" | "added" | "removed" | "rejected";
   note: string | null;
   previous_values: Record<string, unknown> | null;
 };

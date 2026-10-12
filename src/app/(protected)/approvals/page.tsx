@@ -23,6 +23,8 @@ type PendingOrderRow = {
 type PurchaseOrderRow = {
   id: string;
   po_number: string;
+  /** 'direct' = misc items logged by HO2 with no PO (0016_direct_receipts.sql). */
+  kind: "po" | "direct";
   placed_date: string;
   shopkeepers: Rel<{ name: string }>;
   profiles: Rel<{ full_name: string }>;
@@ -112,7 +114,7 @@ export default async function ApprovalsPage({
       .order("received_date", { ascending: true }),
     supabase
       .from("purchase_orders")
-      .select("id, po_number, placed_date, shopkeepers ( name ), profiles ( full_name ), orders!inner ( status )")
+      .select("id, po_number, kind, placed_date, shopkeepers ( name ), profiles ( full_name ), orders!inner ( status )")
       .eq("site_id", selectedSiteId)
       .in("orders.status", OPEN_STATUSES)
       .order("placed_date", { ascending: false }),
@@ -189,6 +191,7 @@ export default async function ApprovalsPage({
         {purchaseOrders.map((po) => {
           const shopkeeper = one(po.shopkeepers);
           const placedByProfile = one(po.profiles);
+          const isDirect = po.kind === "direct";
 
           return (
             <section key={po.id} className="flex flex-col gap-3">
@@ -196,11 +199,16 @@ export default async function ApprovalsPage({
                 <span className="rounded-full border border-brand-border bg-brand-cream px-2.5 py-0.5 font-mono text-[12px] font-bold text-brand-navy">
                   {po.po_number}
                 </span>
+                {isDirect && (
+                  <span className="rounded-full bg-purple-100 px-2.5 py-0.5 text-[11px] font-bold text-purple-800">
+                    Direct Receipt
+                  </span>
+                )}
                 <span className="text-sm font-bold text-brand-navy">
-                  {shopkeeper?.name ?? "Unknown vendor"}
+                  {shopkeeper?.name ?? (isDirect ? "No vendor" : "Unknown vendor")}
                 </span>
                 <span className="text-xs text-[#7b8494]">
-                  Placed by {placedByProfile?.full_name ?? "Unknown"} on{" "}
+                  {isDirect ? "Logged" : "Placed"} by {placedByProfile?.full_name ?? "Unknown"} on{" "}
                   {formatDate(po.placed_date)}
                 </span>
               </div>
@@ -242,8 +250,9 @@ export default async function ApprovalsPage({
                           />
                         </div>
                         <p className="mt-0.5 text-xs text-[#6b7280]">
-                          Ordered: {order.quantity_ordered} {order.unit} · Received:{" "}
-                          {receivedTotal} {order.unit} · Approved: {approvedTotal} {order.unit}
+                          {isDirect
+                            ? `Received: ${receivedTotal} ${order.unit} (no PO)`
+                            : `Ordered: ${order.quantity_ordered} ${order.unit} · Received: ${receivedTotal} ${order.unit} · Approved: ${approvedTotal} ${order.unit}`}
                         </p>
                       </div>
                       <StatusBadge status={lineDisplayStatus(order.status, approvedTotal)} />
@@ -330,6 +339,26 @@ export default async function ApprovalsPage({
                             Everything received so far is approved — waiting on the remaining{" "}
                             {Number(shortBy.toFixed(2))} {order.unit} to be delivered.
                           </p>
+                        )}
+
+                        {isDirect && toApprove > 0 && (
+                          <details>
+                            <summary className="cursor-pointer text-sm font-semibold text-red-600">
+                              Don&apos;t recognise this? Reject it
+                            </summary>
+                            <div className="mt-3 flex flex-col gap-3">
+                              <p className="text-xs text-[#6b7280]">
+                                Rejected items are not added to stock. The reason is shown to the
+                                receiving team.
+                              </p>
+                              <ApproveOrderForm
+                                orderId={order.id}
+                                reject
+                                label="Reject item"
+                                remarksPlaceholder="e.g. not authorised, no bill provided"
+                              />
+                            </div>
+                          </details>
                         )}
 
                         {!isFullyReceived && toApprove > 0 && (

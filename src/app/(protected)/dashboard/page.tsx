@@ -10,7 +10,19 @@ type SiteCard = {
   roles: string[];
 };
 
-type OrderStatusRow = { site_id: string; purchase_order_id: string; status: OrderStatus };
+type Rel<T> = T | T[] | null;
+
+type OrderStatusRow = {
+  site_id: string;
+  purchase_order_id: string;
+  status: OrderStatus;
+  purchase_orders: Rel<{ kind: "po" | "direct" }>;
+};
+
+function one<T>(rel: Rel<T>): T | null {
+  if (!rel) return null;
+  return Array.isArray(rel) ? (rel[0] ?? null) : rel;
+}
 
 export default async function DashboardPage() {
   const user = await requireUser();
@@ -44,7 +56,7 @@ export default async function DashboardPage() {
     siteIds.length > 0
       ? await supabase
           .from("orders")
-          .select("site_id, purchase_order_id, status")
+          .select("site_id, purchase_order_id, status, purchase_orders ( kind )")
           .in("site_id", siteIds)
           .in("status", ["placed", "pending_approval"])
       : { data: [] as OrderStatusRow[] };
@@ -53,10 +65,13 @@ export default async function DashboardPage() {
   // approval counts lines, since each line is approved on its own.
   const openPosBySite = new Map<string, Set<string>>();
   const needsApprovalBySite = new Map<string, number>();
-  for (const row of (orderStatusData ?? []) as OrderStatusRow[]) {
-    const pos = openPosBySite.get(row.site_id) ?? new Set<string>();
-    pos.add(row.purchase_order_id);
-    openPosBySite.set(row.site_id, pos);
+  for (const row of (orderStatusData ?? []) as unknown as OrderStatusRow[]) {
+    // Direct receipts (no PO) count towards approvals, not open orders.
+    if (one(row.purchase_orders)?.kind !== "direct") {
+      const pos = openPosBySite.get(row.site_id) ?? new Set<string>();
+      pos.add(row.purchase_order_id);
+      openPosBySite.set(row.site_id, pos);
+    }
     if (row.status === "pending_approval") {
       needsApprovalBySite.set(
         row.site_id,

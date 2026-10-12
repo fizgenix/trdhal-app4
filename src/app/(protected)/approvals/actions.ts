@@ -65,3 +65,45 @@ export async function approveOrder(
   await flashToast(success);
   return { error: null, success };
 }
+
+const rejectSchema = z.object({
+  orderId: z.string().uuid(),
+  reason: z.string().trim().min(1, "Add a reason for rejecting this item."),
+});
+
+/**
+ * Rejects a direct-receipt line (no PO behind it) via the
+ * reject_direct_receipt RPC (0016_direct_receipts.sql) — it's cancelled
+ * and never reaches stock. The reason shows on the Receiving page.
+ */
+export async function rejectDirectReceipt(
+  _prev: ApprovalFormState,
+  formData: FormData,
+): Promise<ApprovalFormState> {
+  await requireUser();
+
+  const parsed = rejectSchema.safeParse({
+    orderId: formData.get("order_id"),
+    reason: formData.get("remarks") ?? "",
+  });
+
+  if (!parsed.success) {
+    return {
+      error: parsed.error.issues[0]?.message ?? "Check the details and try again.",
+      success: null,
+    };
+  }
+
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("reject_direct_receipt", {
+    p_order_id: parsed.data.orderId,
+    p_reason: parsed.data.reason,
+  });
+
+  if (error) return { error: error.message, success: null };
+
+  revalidatePath("/approvals");
+  revalidatePath("/receiving");
+  await flashToast("Item rejected.");
+  return { error: null, success: "Item rejected." };
+}

@@ -154,6 +154,8 @@ export default async function OrdersPage({
       .from("purchase_orders")
       .select("id, po_number, placed_date, placed_by, shopkeepers ( name ), profiles ( full_name )")
       .eq("site_id", selectedSiteId)
+      // Direct receipts (MISC-, no PO) are HO2's — shown on Receiving / Approvals.
+      .eq("kind", "po")
       .order("placed_date", { ascending: false }),
     // Oldest first: lines list in the order they were entered on the PO.
     supabase

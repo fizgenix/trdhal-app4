@@ -3,7 +3,6 @@
 import { useActionState, useMemo, useState } from "react";
 import { releaseInventory, type ReleaseFormState } from "./actions";
 import { Field } from "@/components/ui/Field";
-import { Select } from "@/components/ui/Select";
 import { Button } from "@/components/ui/Button";
 import { CardHeaderBand } from "@/components/ui/CardHeaderBand";
 import { SearchableSelect } from "@/components/ui/SearchableSelect";
@@ -55,22 +54,20 @@ export function ReleaseInventoryForm({
       </div>
 
       <div className="sm:col-span-2">
-        <Select
+        <SearchableSelect
           label="Item"
           name="stock_line"
+          noun="item"
+          allowNew={false}
           required
-          defaultValue=""
-          onChange={(e) => setSelectedKey(e.target.value)}
-        >
-          <option value="" disabled>
-            Choose an item
-          </option>
-          {stockItems.map((i) => (
-            <option key={i.key} value={i.key}>
-              {i.name} — {i.available} {i.unit} available
-            </option>
-          ))}
-        </Select>
+          placeholder="Search for an item…"
+          options={stockItems.map((i) => ({
+            id: i.key,
+            name: i.name,
+            label: `${i.name} — ${i.available} ${i.unit} available`,
+          }))}
+          onSelect={(id) => setSelectedKey(id)}
+        />
         {/* Stock is per item *and* unit, so both go to the server. */}
         <input type="hidden" name="item_id" value={selectedItem?.itemId ?? ""} />
         <input type="hidden" name="unit" value={selectedItem?.unit ?? ""} />
