@@ -3,6 +3,8 @@ import { createClient } from "@/lib/supabase/server";
 import { Select } from "@/components/ui/Select";
 import { SubmitButton, SubmitIconButton } from "@/components/ui/SubmitButton";
 import { CreateUserForm } from "./CreateUserForm";
+import { ResetPasswordForm } from "./ResetPasswordForm";
+import { DeleteUserButton } from "./DeleteUserButton";
 import { assignUserToSite, removeUserSiteAssignment } from "./actions";
 
 type ProfileRow = {
@@ -11,6 +13,7 @@ type ProfileRow = {
   email: string | null;
   is_admin: boolean;
   is_active: boolean;
+  must_change_password: boolean;
 };
 
 type AssignmentRow = {
@@ -28,17 +31,21 @@ function siteName(sites: AssignmentRow["sites"]): string {
 }
 
 export default async function AdminUsersPage() {
-  await requireAdmin();
+  const me = await requireAdmin();
   const supabase = await createClient();
 
   const [{ data: profiles }, { data: sites }, { data: assignments }] =
     await Promise.all([
       supabase
         .from("profiles")
-        .select("id, full_name, email, is_admin, is_active")
+        .select(
+          "id, full_name, email, is_admin, is_active, must_change_password",
+        )
         .order("full_name"),
       supabase.from("sites").select("id, name").order("name"),
-      supabase.from("user_sites").select("id, user_id, site_id, role, sites ( name )"),
+      supabase
+        .from("user_sites")
+        .select("id, user_id, site_id, role, sites ( name )"),
     ]);
 
   const assignmentsByUser = new Map<
@@ -75,17 +82,31 @@ export default async function AdminUsersPage() {
                 <p className="font-bold text-brand-navy">{p.full_name}</p>
                 <p className="text-sm text-[#6b7280]">{p.email}</p>
               </div>
-              {p.is_admin && (
-                <span className="rounded-full bg-brand-navy px-3.5 py-1.5 text-xs font-bold text-brand-gold-text">
-                  Admin — all sites
-                </span>
-              )}
-              {!p.is_active && (
-                <span className="rounded-full bg-[#d3cbb9] px-3.5 py-1.5 text-xs font-bold text-[#4b5563]">
-                  Inactive
-                </span>
-              )}
+              <div className="flex flex-wrap items-center gap-2">
+                {p.is_admin && (
+                  <span className="rounded-full bg-brand-navy px-3.5 py-1.5 text-xs font-bold text-brand-gold-text">
+                    Admin — all sites
+                  </span>
+                )}
+                {p.must_change_password && (
+                  <span className="rounded-full bg-[#fbf3dc] px-3.5 py-1.5 text-xs font-bold text-[#7a5608]">
+                    On temporary password
+                  </span>
+                )}
+                {!p.is_active && (
+                  <span className="rounded-full bg-[#d3cbb9] px-3.5 py-1.5 text-xs font-bold text-[#4b5563]">
+                    Inactive
+                  </span>
+                )}
+                {p.id !== me.id && (
+                  <DeleteUserButton userId={p.id} fullName={p.full_name} />
+                )}
+              </div>
             </div>
+
+            {p.id !== me.id && p.is_active && (
+              <ResetPasswordForm userId={p.id} fullName={p.full_name} />
+            )}
 
             {!p.is_admin && (
               <>
@@ -109,7 +130,9 @@ export default async function AdminUsersPage() {
                     </form>
                   ))}
                   {(assignmentsByUser.get(p.id) ?? []).length === 0 && (
-                    <span className="text-xs text-[#7b8494]">No sites assigned yet.</span>
+                    <span className="text-xs text-[#7b8494]">
+                      No sites assigned yet.
+                    </span>
                   )}
                 </div>
 
@@ -119,7 +142,12 @@ export default async function AdminUsersPage() {
                 >
                   <input type="hidden" name="user_id" value={p.id} />
                   <div className="w-48">
-                    <Select label="Site" name="site_id" required defaultValue="">
+                    <Select
+                      label="Site"
+                      name="site_id"
+                      required
+                      defaultValue=""
+                    >
                       <option value="" disabled>
                         Choose a site
                       </option>
@@ -135,11 +163,13 @@ export default async function AdminUsersPage() {
                       <option value="" disabled>
                         Choose a role
                       </option>
-                      {Object.entries(SITE_ROLE_LABELS).map(([value, label]) => (
-                        <option key={value} value={value}>
-                          {label}
-                        </option>
-                      ))}
+                      {Object.entries(SITE_ROLE_LABELS).map(
+                        ([value, label]) => (
+                          <option key={value} value={value}>
+                            {label}
+                          </option>
+                        ),
+                      )}
                     </Select>
                   </div>
                   <SubmitButton variant="secondary" pendingText="Assigning…">
@@ -151,7 +181,9 @@ export default async function AdminUsersPage() {
           </div>
         ))}
         {typedProfiles.length === 0 && (
-          <p className="text-[#7b8494]">No users yet — create the first login above.</p>
+          <p className="text-[#7b8494]">
+            No users yet — create the first login above.
+          </p>
         )}
       </div>
     </div>

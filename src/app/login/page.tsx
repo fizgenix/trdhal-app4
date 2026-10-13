@@ -1,12 +1,32 @@
 "use client";
 
-import { useActionState } from "react";
+import { Suspense, useActionState } from "react";
+import { useSearchParams } from "next/navigation";
 import { signIn, type LoginState } from "./actions";
 import { Field } from "@/components/ui/Field";
 import { Button } from "@/components/ui/Button";
 import { BrandMark } from "@/components/BrandMark";
+import { markTabAlive, recordActivity } from "@/components/SessionGuard";
 
 const initialState: LoginState = { error: null };
+
+const SIGNED_OUT_MESSAGES: Record<string, string> = {
+  idle: "You were signed out after 20 minutes of inactivity.",
+  closed: "You were signed out because the app was closed. Please sign in again.",
+  max: "Your session ended after 12 hours. Please sign in again.",
+  revoked: "Your session has ended. Please sign in again.",
+};
+
+function SignedOutNotice() {
+  const reason = useSearchParams().get("reason");
+  const message = reason ? SIGNED_OUT_MESSAGES[reason] : undefined;
+  if (!message) return null;
+  return (
+    <p className="rounded-lg bg-[#fbf3dc] px-4 py-3 text-sm font-medium text-[#7a5608]">
+      {message}
+    </p>
+  );
+}
 
 export default function LoginPage() {
   const [state, formAction, isPending] = useActionState(signIn, initialState);
@@ -30,7 +50,20 @@ export default function LoginPage() {
         <div className="flex flex-col justify-center gap-5 px-8 py-12 sm:px-10">
           <h2 className="text-xl font-extrabold text-brand-navy">Sign in</h2>
 
-          <form action={formAction} className="flex flex-col gap-5">
+          <Suspense fallback={null}>
+            <SignedOutNotice />
+          </Suspense>
+
+          <form
+            action={formAction}
+            // Mark this tab as signed in and restart the idle clock, so a
+            // stale timestamp from the last person can't sign them straight out.
+            onSubmit={() => {
+              markTabAlive();
+              recordActivity();
+            }}
+            className="flex flex-col gap-5"
+          >
             <Field
               label="Email"
               type="email"

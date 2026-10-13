@@ -21,6 +21,8 @@ export type CurrentUser = {
   fullName: string;
   email: string | null;
   isAdmin: boolean;
+  /** Still on an Admin-set temporary password — see requireUser. */
+  mustChangePassword: boolean;
   siteAssignments: SiteAssignment[];
   /** Every site this user can open (all of them for Admin), by name. */
   sites: { id: string; name: string; location: string | null }[];
@@ -60,7 +62,7 @@ export const getCurrentUser = cache(async (): Promise<CurrentUser | null> => {
   const [{ data: profile }, { data: assignments }, { data: sites }] = await Promise.all([
     supabase
       .from("profiles")
-      .select("id, full_name, email, is_admin, is_active")
+      .select("id, full_name, email, is_admin, is_active, must_change_password")
       .eq("id", userId)
       .single(),
     supabase
@@ -87,15 +89,22 @@ export const getCurrentUser = cache(async (): Promise<CurrentUser | null> => {
     fullName: profile.full_name,
     email: profile.email,
     isAdmin: profile.is_admin,
+    mustChangePassword: profile.must_change_password ?? false,
     siteAssignments,
     sites: sites ?? [],
   };
 });
 
-/** Redirects to /login if there's no signed-in, active user. */
+/**
+ * Redirects to /login if there's no signed-in, active user, and to
+ * /set-password while they're still on an Admin-set temporary password —
+ * every protected page and action goes through here, so that one check
+ * locks the whole app until they pick their own.
+ */
 export async function requireUser(): Promise<CurrentUser> {
   const user = await getCurrentUser();
   if (!user) redirect("/login");
+  if (user.mustChangePassword) redirect("/set-password");
   return user;
 }
 

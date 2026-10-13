@@ -2,6 +2,7 @@ import { ReactNode } from "react";
 import { requireUser, SITE_ROLE_LABELS } from "@/lib/auth";
 import { NavBar } from "@/components/NavBar";
 import { Toaster } from "@/components/Toaster";
+import { SessionGuard } from "@/components/SessionGuard";
 import { readToast } from "@/lib/toast";
 
 export default async function ProtectedLayout({
@@ -26,6 +27,7 @@ export default async function ProtectedLayout({
       <main className="mx-auto max-w-6xl px-4 py-8 sm:px-8">{children}</main>
 
       <Toaster toast={await readToast()} />
+      <SessionGuard />
     </div>
   );
 }

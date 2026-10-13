@@ -12,26 +12,44 @@ export function CreateUserForm() {
   const [state, formAction, isPending] = useActionState(createUser, initialState);
 
   return (
+    // autoComplete="off" + the per-field hints below stop the browser from
+    // filling in the signed-in Admin's own saved email and password.
     <form
       action={formAction}
+      autoComplete="off"
       className="grid gap-4 rounded-2xl border border-brand-border bg-white p-6 shadow-sm sm:grid-cols-2"
     >
       <div className="sm:col-span-2">
         <CardHeaderBand>Create a login</CardHeaderBand>
       </div>
-      <Field label="Full name" name="full_name" placeholder="e.g. Ramesh Kumar" required />
+      <Field
+        label="Full name"
+        name="full_name"
+        autoComplete="off"
+        placeholder="e.g. Ramesh Kumar"
+        required
+      />
       <Field
         label="Login email"
         name="email"
         type="email"
+        autoComplete="off"
         placeholder="ho2.sitea@trdhal.app"
         required
       />
-      <Field label="Phone (optional)" name="phone" type="tel" placeholder="+91 90000 00000" />
+      <Field
+        label="Phone (optional)"
+        name="phone"
+        type="tel"
+        autoComplete="off"
+        placeholder="+91 90000 00000"
+      />
       <Field
         label="Temporary password"
         name="password"
-        type="password"
+        type="text"
+        autoComplete="new-password"
+        spellCheck={false}
         placeholder="At least 8 characters"
         required
         minLength={8}

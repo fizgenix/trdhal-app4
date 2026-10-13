@@ -75,6 +75,7 @@ export function NavBar({
           {adminItems.map((item) => (
             <NavLink key={item.href} item={item} pathname={pathname} />
           ))}
+          <NavLink item={{ href: "/account", label: "Account" }} pathname={pathname} />
           <span className="ml-2">
             <SignOutButton />
           </span>
