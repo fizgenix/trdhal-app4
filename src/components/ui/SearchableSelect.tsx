@@ -186,6 +186,8 @@ export function SearchableSelect({
         aria-controls={listId}
         aria-autocomplete="list"
         value={query}
+        // A long name can overflow the box — hovering shows all of it.
+        title={query || undefined}
         placeholder={placeholder}
         required={required}
         onFocus={openList}
@@ -265,7 +267,7 @@ export function SearchableSelect({
                 onMouseDown={(e) => e.preventDefault()}
                 onMouseEnter={() => setHighlight(i)}
                 onClick={() => choose(row)}
-                className={`block w-full px-3.5 py-2 text-left text-sm text-brand-navy ${
+                className={`block w-full break-words px-3.5 py-2 text-left text-sm text-brand-navy ${
                   i === active ? "bg-brand-cream" : ""
                 } ${row.isAddNew ? "border-b border-brand-border-soft font-bold" : ""}`}
               >

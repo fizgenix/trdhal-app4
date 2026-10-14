@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useState } from "react";
+import { useActionState, useState, useSyncExternalStore } from "react";
 import { createOrder, type OrderFormState } from "./actions";
 import { Field } from "@/components/ui/Field";
 import { Button } from "@/components/ui/Button";
@@ -12,6 +12,16 @@ type Shopkeeper = { id: string; name: string };
 
 const initialState: OrderFormState = { error: null, success: null };
 
+/** Today's date in the browser's own timezone, as YYYY-MM-DD. */
+function localToday() {
+  const now = new Date();
+  const mm = String(now.getMonth() + 1).padStart(2, "0");
+  const dd = String(now.getDate()).padStart(2, "0");
+  return `${now.getFullYear()}-${mm}-${dd}`;
+}
+
+const noopSubscribe = () => () => {};
+
 export function NewOrderForm({
   siteId,
   items,
@@ -22,6 +32,8 @@ export function NewOrderForm({
   shopkeepers: Shopkeeper[];
 }) {
   const [state, formAction, isPending] = useActionState(createOrder, initialState);
+  // Read in the browser — see useToday() in receiving/LogReceivingForm.
+  const today = useSyncExternalStore(noopSubscribe, localToday, () => undefined);
   const [isNewShopkeeper, setIsNewShopkeeper] = useState(false);
   const [formKey, setFormKey] = useState(0);
   // Keys of the item lines on screen. Keys are never reused, so removing a
@@ -66,6 +78,17 @@ export function NewOrderForm({
 
       <Field label="PO Number" name="po_number" placeholder="e.g. PO-00123" required />
 
+      <Field
+        label="Order date"
+        name="placed_date"
+        type="date"
+        defaultValue={today}
+        // Orders can't be dated ahead — future days are greyed out in the
+        // picker (also enforced in createOrder and the DB).
+        max={today}
+        required
+      />
+
       <SearchableSelect
         label="Vendor"
         name="shopkeeper_id"
@@ -100,6 +123,7 @@ export function NewOrderForm({
             <OrderLineFields
               lineKey={key}
               items={items}
+              withDescription
               onRemove={
                 lineKeys.length > 1
                   ? () => setLineKeys((keys) => keys.filter((k) => k !== key))

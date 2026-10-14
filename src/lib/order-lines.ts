@@ -18,6 +18,9 @@ export const lineSchema = z.object({
   // The line's unit. Standardised so a typed "Kgs" / "kilograms" lands as "kg".
   unit: z.string().trim().min(1, "Choose the unit for every item.").transform(canonicalUnit),
   quantityOrdered: z.coerce.number().positive("Enter a quantity greater than zero for every item."),
+  // Optional per-line description (size, brand, spec). Only the Orders
+  // tab posts it — a direct receipt's lines come through as "".
+  description: z.string().trim().max(200, "Keep each item's description under 200 characters."),
 });
 
 export type OrderLineInput = z.infer<typeof lineSchema>;
@@ -40,6 +43,7 @@ export function readLines(formData: FormData) {
         ? formData.get(`unit_new_${k}`)
         : formData.get(`unit_id_${k}`)) ?? "",
     quantityOrdered: formData.get(`quantity_ordered_${k}`),
+    description: formData.get(`description_${k}`) ?? "",
   }));
 }
 

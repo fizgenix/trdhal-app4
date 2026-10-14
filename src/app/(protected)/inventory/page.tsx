@@ -119,7 +119,7 @@ export default async function InventoryPage({
         <div>
           <h1 className="text-2xl font-extrabold text-brand-navy">Stock Inventory</h1>
           <p className="text-[#6b7280]">
-            Approved stock in, releases out — the full history of every item at this site.
+            Approved stock in (dated by when it was received), releases out — the full history of every item at this site.
           </p>
         </div>
         {sites.length > 1 && (
@@ -175,7 +175,7 @@ export default async function InventoryPage({
                   <div className="flex min-w-0 items-center gap-2">
                     <span className="text-[#8a836f] transition-transform group-open:rotate-90">▸</span>
                     <span className="min-w-0">
-                      <span className="block truncate text-sm font-bold text-brand-navy">
+                      <span className="block break-words text-sm font-bold text-brand-navy">
                         {line.itemName}
                       </span>
                       <span className="block text-[11px] text-[#7b8494] sm:hidden">

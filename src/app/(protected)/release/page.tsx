@@ -4,6 +4,7 @@ import { SiteSwitcher } from "@/components/SiteSwitcher";
 import { resolveSelectedSiteId } from "@/lib/selected-site";
 import { CardHeaderBand } from "@/components/ui/CardHeaderBand";
 import { ReleaseInventoryForm } from "./ReleaseInventoryForm";
+import { ApprovedStockList } from "./ApprovedStockList";
 
 type Rel<T> = T | T[] | null;
 
@@ -126,19 +127,7 @@ export default async function ReleasePage({
               No approved stock to release yet — items become available once HO3 approves a delivery.
             </p>
           ) : (
-            <div className="mt-1 flex flex-col">
-              {stockItems.map((i) => (
-                <div
-                  key={i.key}
-                  className="flex items-center justify-between border-b border-brand-border-soft py-2.5 text-sm last:border-0"
-                >
-                  <span className="text-brand-navy">
-                    {i.name} <span className="text-[#7b8494]">({i.unit})</span>
-                  </span>
-                  <span className="font-bold text-brand-navy">{i.available}</span>
-                </div>
-              ))}
-            </div>
+            <ApprovedStockList items={stockItems} />
           )}
         </div>
 

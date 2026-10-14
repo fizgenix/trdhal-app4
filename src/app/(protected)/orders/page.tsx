@@ -44,6 +44,8 @@ type OrderLineRow = {
   quantity_ordered: number;
   /** The line's own unit — receiving and approval stay in it. */
   unit: string;
+  /** Optional note entered with the line (size, brand, spec). */
+  description: string | null;
   status: OrderStatus;
   placed_by: string;
   items: Rel<{ name: string }>;
@@ -161,7 +163,7 @@ export default async function OrdersPage({
     supabase
       .from("orders")
       .select(
-        "id, purchase_order_id, item_id, quantity_ordered, unit, status, placed_by, items ( name )",
+        "id, purchase_order_id, item_id, quantity_ordered, unit, description, status, placed_by, items ( name )",
       )
       .eq("site_id", selectedSiteId)
       .order("created_at"),
@@ -412,14 +414,19 @@ export default async function OrdersPage({
                     return (
                       <div key={line.id} className={`px-4 py-3 ${isRemoved ? "opacity-60" : ""}`}>
                         <div className="grid items-center gap-x-3 gap-y-1 sm:grid-cols-[minmax(0,1.6fr)_0.7fr_0.7fr_1fr_auto]">
-                          <p
-                            className={`text-sm font-bold text-brand-navy ${isRemoved ? "line-through" : ""}`}
-                          >
-                            {item?.name ?? "Unknown item"}{" "}
-                            <span className="text-xs font-normal text-[#7b8494]">
-                              ({line.unit})
-                            </span>
-                          </p>
+                          <div className="min-w-0">
+                            <p
+                              className={`break-words text-sm font-bold text-brand-navy ${isRemoved ? "line-through" : ""}`}
+                            >
+                              {item?.name ?? "Unknown item"}{" "}
+                              <span className="text-xs font-normal text-[#7b8494]">
+                                ({line.unit})
+                              </span>
+                            </p>
+                            {line.description && (
+                              <p className="text-xs text-[#7b8494]">{line.description}</p>
+                            )}
+                          </div>
                           <p className="text-xs text-[#6b7280]">
                             <span className="sm:hidden">Ordered: </span>
                             {line.quantity_ordered} {line.unit}

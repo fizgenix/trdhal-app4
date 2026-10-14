@@ -6,7 +6,9 @@ import { matchScore, SHOW_THRESHOLD } from "@/lib/fuzzy";
  * Stock ledger for one site, shared by the Stock Inventory page and its
  * Excel (CSV) download. Stock is approved − released per item + unit
  * (0015_stock_from_approvals.sql): every HO3 approval is an IN movement,
- * every release an OUT movement, with a running balance.
+ * every release an OUT movement, with a running balance. An approval that
+ * covers several deliveries becomes one IN movement per delivery, each
+ * dated by when it was received and showing only its own invoice.
  */
 
 type Rel<T> = T | T[] | null;
@@ -33,7 +35,14 @@ type ApprovalRow = {
   }>;
 };
 
-type ReceivingRow = { order_id: string; quantity_received: number; invoice_number: string | null };
+type ReceivingRow = {
+  id: string;
+  order_id: string;
+  quantity_received: number;
+  invoice_number: string | null;
+  received_date: string;
+  created_at: string;
+};
 
 type ReleaseRow = {
   id: string;
@@ -50,6 +59,7 @@ type ReleaseRow = {
 export type Movement = {
   id: string;
   type: "in" | "out";
+  /** IN: the date the delivery was received. OUT: the release date. */
   date: string;
   /** Signed: + approved in, − released. 0 for a close-short with nothing new approved. */
   quantity: number;
@@ -122,7 +132,7 @@ export async function loadInventory(
         .eq("orders.site_id", siteId),
       supabase
         .from("receiving_logs")
-        .select("order_id, quantity_received, invoice_number, orders!inner ( site_id )")
+        .select("id, order_id, quantity_received, invoice_number, received_date, created_at, orders!inner ( site_id )")
         .eq("orders.site_id", siteId),
       supabase
         .from("inventory_releases")
@@ -132,17 +142,29 @@ export async function loadInventory(
         .eq("site_id", siteId),
     ]);
 
-  // Per PO line: total received and its invoice numbers, for the IN rows.
+  // Per PO line: total received, and its deliveries in the order logged.
+  type Receipt = {
+    id: string;
+    quantity: number;
+    invoice: string | null;
+    receivedDate: string;
+    loggedAt: number;
+  };
   const receivedByLine = new Map<string, number>();
-  const invoicesByLine = new Map<string, Set<string>>();
+  const receiptsByLine = new Map<string, Receipt[]>();
   for (const r of (receivingData ?? []) as unknown as ReceivingRow[]) {
     receivedByLine.set(r.order_id, (receivedByLine.get(r.order_id) ?? 0) + Number(r.quantity_received));
-    if (r.invoice_number) {
-      const set = invoicesByLine.get(r.order_id) ?? new Set<string>();
-      set.add(r.invoice_number);
-      invoicesByLine.set(r.order_id, set);
-    }
+    const list = receiptsByLine.get(r.order_id) ?? [];
+    list.push({
+      id: r.id,
+      quantity: Number(r.quantity_received),
+      invoice: r.invoice_number,
+      receivedDate: r.received_date,
+      loggedAt: new Date(r.created_at).getTime(),
+    });
+    receiptsByLine.set(r.order_id, list);
   }
+  for (const list of receiptsByLine.values()) list.sort((a, b) => a.loggedAt - b.loggedAt);
 
   type Draft = { key: string; itemName: string; unit: string; events: Omit<Movement, "balance">[] };
   const byKey = new Map<string, Draft>();
@@ -156,25 +178,78 @@ export async function loadInventory(
     return d;
   };
 
+  // Approvals per line, oldest first: each one covers the deliveries
+  // logged before it that no earlier approval covered (approve_order
+  // approves everything received but not yet approved).
+  const approvalsByLine = new Map<string, ApprovalRow[]>();
   for (const a of (approvalsData ?? []) as unknown as ApprovalRow[]) {
-    const line = one(a.orders);
-    if (!line) continue;
-    const po = one(line.purchase_orders);
-    const received = receivedByLine.get(a.order_id) ?? 0;
-    const ordered = Number(line.quantity_ordered);
-    draft(line.item_id, one(line.items)?.name ?? "Unknown item", line.unit).events.push({
-      id: a.id,
-      type: "in",
-      date: a.approved_date,
-      quantity: Number(a.quantity_approved),
-      by: one(a.profiles)?.full_name ?? "Unknown",
-      poNumber: po?.po_number,
-      vendor: one(po?.shopkeepers ?? null)?.name,
-      invoices: Array.from(invoicesByLine.get(a.order_id) ?? []),
-      overBy: received > ordered ? round(received - ordered) : undefined,
-      shortBy: a.closes_short ? round(ordered - received) : undefined,
-      remarks: a.remarks,
-    });
+    const list = approvalsByLine.get(a.order_id) ?? [];
+    list.push(a);
+    approvalsByLine.set(a.order_id, list);
+  }
+
+  for (const [orderId, lineApprovals] of approvalsByLine) {
+    lineApprovals.sort((x, y) => x.approved_date.localeCompare(y.approved_date));
+    const receipts = receiptsByLine.get(orderId) ?? [];
+    const received = receivedByLine.get(orderId) ?? 0;
+    let next = 0; // first receipt not yet covered by an approval
+
+    for (const a of lineApprovals) {
+      const line = one(a.orders);
+      if (!line) continue;
+      const po = one(line.purchase_orders);
+      const ordered = Number(line.quantity_ordered);
+      const approvedAt = new Date(a.approved_date).getTime();
+
+      const covered: Receipt[] = [];
+      while (next < receipts.length && receipts[next].loggedAt <= approvedAt) {
+        covered.push(receipts[next]);
+        next++;
+      }
+
+      const base = {
+        type: "in" as const,
+        by: one(a.profiles)?.full_name ?? "Unknown",
+        poNumber: po?.po_number,
+        vendor: one(po?.shopkeepers ?? null)?.name,
+      };
+      // Line-level flags and the approval's remarks go on its last row only.
+      const closing = {
+        overBy: received > ordered ? round(received - ordered) : undefined,
+        shortBy: a.closes_short ? round(ordered - received) : undefined,
+        remarks: a.remarks,
+      };
+      const target = draft(line.item_id, one(line.items)?.name ?? "Unknown item", line.unit);
+
+      const coveredTotal = round(covered.reduce((n, r) => n + r.quantity, 0));
+      if (covered.length > 0 && coveredTotal === round(Number(a.quantity_approved))) {
+        covered.forEach((r, i) =>
+          target.events.push({
+            ...base,
+            id: `${a.id}-${r.id}`,
+            date: r.receivedDate,
+            quantity: r.quantity,
+            invoices: r.invoice ? [r.invoice] : [],
+            ...(i === covered.length - 1 ? closing : {}),
+          }),
+        );
+      } else {
+        // Nothing new approved (a close-short of what was already approved),
+        // or the deliveries don't add up to the approval (older data): one
+        // row for the whole approval, dated by its latest delivery.
+        const latest = (covered.length > 0 ? covered : receipts.slice(0, next)).at(-1);
+        target.events.push({
+          ...base,
+          id: a.id,
+          date: latest?.receivedDate ?? a.approved_date,
+          quantity: Number(a.quantity_approved),
+          invoices: Array.from(
+            new Set(covered.map((r) => r.invoice).filter((v): v is string => !!v)),
+          ),
+          ...closing,
+        });
+      }
+    }
   }
 
   for (const r of (releasesData ?? []) as unknown as ReleaseRow[]) {

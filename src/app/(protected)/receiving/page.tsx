@@ -4,8 +4,13 @@ import { SiteSwitcher } from "@/components/SiteSwitcher";
 import { resolveSelectedSiteId } from "@/lib/selected-site";
 import { StatusBadge } from "@/components/StatusBadge";
 import { LogReceivingForm } from "./LogReceivingForm";
+import { RECEIVING_COLUMNS } from "./columns";
 import { DirectReceiptForm } from "./DirectReceiptForm";
+import { editReceiving } from "./actions";
 import { OverReceivedBadge } from "@/components/OverReceivedBadge";
+import { Field } from "@/components/ui/Field";
+import { SubmitButton } from "@/components/ui/SubmitButton";
+import { indiaDay } from "@/lib/inventory";
 import type { OrderStatus } from "@/types/database";
 
 type Rel<T> = T | T[] | null;
@@ -18,6 +23,8 @@ type OpenOrderRow = {
   status: OrderStatus;
   /** The line's own unit — receiving and approval stay in it. */
   unit: string;
+  /** Optional note entered with the line on the Orders tab. */
+  description: string | null;
   items: Rel<{ name: string }>;
 };
 
@@ -60,8 +67,14 @@ type ReceivingLogRow = {
   condition_notes: string | null;
   invoice_number: string | null;
   received_date: string;
+  received_by: string;
+  created_at: string;
   profiles: Rel<{ full_name: string }>;
+  /** Corrections made through edit_receiving (0022_receiving_date_and_edits.sql). */
+  receiving_edit_log: { edited_at: string; note: string | null; profiles: Rel<{ full_name: string }> }[];
 };
+
+type ApprovalTimeRow = { order_id: string; created_at: string };
 
 function one<T>(rel: Rel<T>): T | null {
   if (!rel) return null;
@@ -119,11 +132,12 @@ export default async function ReceivingPage({
     { data: directData },
     { data: itemsData },
     { data: shopkeepersData },
+    { data: approvalsData },
   ] = await Promise.all([
     // Lines oldest-first, so they list in the order entered on the PO.
     supabase
       .from("orders")
-      .select("id, purchase_order_id, quantity_ordered, unit, status, items ( name ), purchase_orders!inner ( kind )")
+      .select("id, purchase_order_id, quantity_ordered, unit, description, status, items ( name ), purchase_orders!inner ( kind )")
       .eq("site_id", selectedSiteId)
       .eq("purchase_orders.kind", "po")
       .in("status", OPEN_STATUSES)
@@ -131,7 +145,7 @@ export default async function ReceivingPage({
     supabase
       .from("receiving_logs")
       .select(
-        "id, order_id, quantity_received, condition_notes, invoice_number, received_date, profiles ( full_name ), orders!inner ( site_id, status )",
+        "id, order_id, quantity_received, condition_notes, invoice_number, received_date, received_by, created_at, profiles ( full_name ), receiving_edit_log ( edited_at, note, profiles ( full_name ) ), orders!inner ( site_id, status )",
       )
       .eq("orders.site_id", selectedSiteId)
       .in("orders.status", OPEN_STATUSES)
@@ -158,7 +172,28 @@ export default async function ReceivingPage({
     canReceiveHere
       ? supabase.from("shopkeepers").select("id, name").order("name")
       : Promise.resolve({ data: [] }),
+    // When each open line was last approved — a delivery logged before
+    // that is covered by the approval and can no longer be edited.
+    supabase
+      .from("approvals")
+      .select("order_id, created_at, orders!inner ( site_id, status )")
+      .eq("orders.site_id", selectedSiteId)
+      .in("orders.status", OPEN_STATUSES),
   ]);
+
+  const lastApprovalByOrder = new Map<string, string>();
+  for (const a of (approvalsData ?? []) as unknown as ApprovalTimeRow[]) {
+    const prev = lastApprovalByOrder.get(a.order_id);
+    if (!prev || new Date(a.created_at) > new Date(prev)) {
+      lastApprovalByOrder.set(a.order_id, a.created_at);
+    }
+  }
+  const canEditLog = (log: ReceivingLogRow) => {
+    if (!canReceiveHere || (!user.isAdmin && log.received_by !== user.id)) return false;
+    const lastApproval = lastApprovalByOrder.get(log.order_id);
+    return !lastApproval || new Date(lastApproval) < new Date(log.created_at);
+  };
+  const today = indiaDay(new Date().toISOString());
 
   const directReceipts = (directData ?? []) as unknown as DirectReceiptRow[];
 
@@ -230,10 +265,10 @@ export default async function ReceivingPage({
       ) : (
         <div className="overflow-hidden rounded-2xl border border-brand-border bg-white shadow-sm">
           {canReceiveHere && (
-            <div className="hidden grid-cols-[44px_1.3fr_0.9fr_0.8fr_0.8fr_0.9fr_1fr_auto] gap-2.5 border-b border-brand-border bg-brand-cream px-5 py-3 text-[10.5px] font-bold uppercase tracking-wider text-[#8a836f] sm:grid">
+            <div className={`hidden ${RECEIVING_COLUMNS} gap-2.5 border-b border-brand-border bg-brand-cream px-5 py-3 text-[10.5px] font-bold uppercase tracking-wider text-[#8a836f] sm:grid`}>
               <div />
               <div>ITEM</div>
-              <div>ORDERED / RECEIVED</div>
+              <div>RECEIVED / ORDERED</div>
               <div>QTY</div>
               <div>DATE</div>
               <div>INVOICE</div>
@@ -246,6 +281,7 @@ export default async function ReceivingPage({
             {purchaseOrders.map((po) => {
               const shopkeeper = one(po.shopkeepers);
               const placedByProfile = one(po.profiles);
+              const orderDate = indiaDay(po.placed_date);
 
               return (
                 <div key={po.id}>
@@ -271,8 +307,13 @@ export default async function ReceivingPage({
                       return (
                         <div key={order.id} className="px-1 py-2 sm:px-0 sm:py-0">
                           <div className="flex flex-wrap items-center justify-between gap-2 px-4 pt-3 sm:hidden">
-                            <p className="text-sm font-bold text-brand-navy">
+                            <p className="min-w-0 flex-1 break-words text-sm font-bold text-brand-navy">
                               {item?.name ?? "Unknown item"}
+                              {order.description && (
+                                <span className="block text-xs font-normal text-[#7b8494]">
+                                  {order.description}
+                                </span>
+                              )}
                             </p>
                             <StatusBadge status={order.status} />
                           </div>
@@ -282,15 +323,22 @@ export default async function ReceivingPage({
                               orderId={order.id}
                               itemName={item?.name ?? "Unknown item"}
                               itemUnit={order.unit}
+                              description={order.description}
+                              orderDate={orderDate}
                               quantityOrdered={order.quantity_ordered}
                               receivedSoFar={receivedSoFar}
                               remainingQuantity={order.quantity_ordered - receivedSoFar}
                             />
                           ) : (
                             <div className="flex items-center justify-between gap-3 px-5 py-3.5 text-sm">
-                              <span className="font-bold text-brand-navy">
+                              <span className="min-w-0 break-words font-bold text-brand-navy">
                                 {item?.name ?? "Unknown item"}{" "}
                                 <span className="font-normal text-[#7b8494]">({order.unit})</span>
+                                {order.description && (
+                                  <span className="block text-xs font-normal text-[#7b8494]">
+                                    {order.description}
+                                  </span>
+                                )}
                               </span>
                               <span className="flex items-center gap-2 text-xs text-[#6b7280]">
                                 <OverReceivedBadge
@@ -298,25 +346,117 @@ export default async function ReceivingPage({
                                   received={receivedSoFar}
                                   unit={order.unit}
                                 />
-                                {order.quantity_ordered} / {receivedSoFar}
+                                {receivedSoFar} / {order.quantity_ordered}
                               </span>
                             </div>
                           )}
 
                           {orderLogs.length > 0 && (
-                            <p className="px-5 pb-3 text-[11px] text-[#7b8494]">
-                              {item?.name ?? "Item"} — receiving history ({orderLogs.length}):{" "}
-                              {orderLogs
-                                .map((log) => {
+                            <div className="px-5 pb-3">
+                              <p className="text-[10.5px] font-bold uppercase tracking-wider text-[#8a836f]">
+                                Receiving history ({orderLogs.length})
+                              </p>
+                              <ul className="mt-1 divide-y divide-brand-border-soft text-xs text-[#4b5563]">
+                                {orderLogs.map((log) => {
                                   const receiver = one(log.profiles);
-                                  return `${log.quantity_received} ${order.unit} logged by ${
-                                    receiver?.full_name ?? "Unknown"
-                                  } on ${formatDate(log.received_date)}${
-                                    log.invoice_number ? ` · Invoice ${log.invoice_number}` : ""
-                                  }${log.condition_notes ? ` ("${log.condition_notes}")` : ""}`;
-                                })
-                                .join(" · ")}
-                            </p>
+                                  const lastEdit = [...log.receiving_edit_log].sort((a, b) =>
+                                    b.edited_at.localeCompare(a.edited_at),
+                                  )[0];
+                                  return (
+                                    <li key={log.id} className="py-1.5">
+                                      <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5">
+                                        <span className="font-bold text-brand-navy">
+                                          {log.quantity_received} {order.unit}
+                                        </span>
+                                        <span>{formatDate(log.received_date)}</span>
+                                        {log.invoice_number && <span>Invoice {log.invoice_number}</span>}
+                                        <span className="text-[#7b8494]">
+                                          by {receiver?.full_name ?? "Unknown"}
+                                        </span>
+                                        {lastEdit && (
+                                          <span
+                                            className="rounded-full bg-amber-100 px-2 py-0.5 text-[10.5px] font-bold text-amber-800"
+                                            title={lastEdit.note ? `Reason: ${lastEdit.note}` : undefined}
+                                          >
+                                            Edited by {one(lastEdit.profiles)?.full_name ?? "Unknown"} on{" "}
+                                            {formatDate(lastEdit.edited_at)}
+                                          </span>
+                                        )}
+                                      </div>
+                                      {log.condition_notes && (
+                                        <p className="mt-0.5 break-words text-[#7b8494]">
+                                          &quot;{log.condition_notes}&quot;
+                                        </p>
+                                      )}
+                                      {canEditLog(log) && (
+                                        <details className="mt-1">
+                                          <summary className="cursor-pointer text-xs font-semibold text-brand-navy">
+                                            Edit
+                                          </summary>
+                                          <form
+                                            action={editReceiving}
+                                            className="mt-2 flex flex-wrap items-end gap-3"
+                                          >
+                                            <input type="hidden" name="receiving_log_id" value={log.id} />
+                                            <div className="w-36">
+                                              <Field
+                                                label="Quantity"
+                                                id={`rq-${log.id}`}
+                                                name="quantity_received"
+                                                type="number"
+                                                step="0.01"
+                                                min="0.01"
+                                                defaultValue={log.quantity_received}
+                                                suffix={order.unit}
+                                                required
+                                              />
+                                            </div>
+                                            <div className="w-44">
+                                              <Field
+                                                label="Received date"
+                                                id={`rd-${log.id}`}
+                                                name="received_date"
+                                                type="date"
+                                                defaultValue={indiaDay(log.received_date)}
+                                                min={orderDate}
+                                                max={today}
+                                                required
+                                              />
+                                            </div>
+                                            <div className="w-40">
+                                              <Field
+                                                label="Invoice"
+                                                id={`ri-${log.id}`}
+                                                name="invoice_number"
+                                                defaultValue={log.invoice_number ?? ""}
+                                                required
+                                              />
+                                            </div>
+                                            <div className="w-48">
+                                              <Field
+                                                label="Notes"
+                                                id={`rn-${log.id}`}
+                                                name="condition_notes"
+                                                defaultValue={log.condition_notes ?? ""}
+                                              />
+                                            </div>
+                                            <div className="w-56">
+                                              <Field
+                                                label="Reason (optional)"
+                                                id={`rr-${log.id}`}
+                                                name="note"
+                                                placeholder="e.g. wrong quantity typed"
+                                              />
+                                            </div>
+                                            <SubmitButton variant="secondary">Save</SubmitButton>
+                                          </form>
+                                        </details>
+                                      )}
+                                    </li>
+                                  );
+                                })}
+                              </ul>
+                            </div>
                           )}
                         </div>
                       );

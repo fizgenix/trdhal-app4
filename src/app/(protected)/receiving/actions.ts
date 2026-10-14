@@ -72,6 +72,64 @@ export async function logReceiving(
   return { error: null, success: "Delivery logged." };
 }
 
+const editReceivingSchema = z.object({
+  receivingLogId: z.string().uuid(),
+  quantityReceived: z.coerce.number().positive("Enter a quantity greater than zero."),
+  receivedDate: z
+    .string()
+    .min(1, "Pick the date this delivery arrived.")
+    .refine((d) => d <= todayInIndia(), "The received date can't be in the future."),
+  invoiceNumber: z.string().trim().min(1, "Enter the invoice number for this delivery."),
+  conditionNotes: z.string().trim(),
+  note: z.string().trim(),
+});
+
+/**
+ * Corrects a logged delivery via the edit_receiving RPC
+ * (0022_receiving_date_and_edits.sql) — only by whoever logged it (or
+ * Admin), and only until HO3 has approved it; the RPC enforces both and
+ * keeps the previous values in receiving_edit_log.
+ */
+export async function editReceiving(formData: FormData) {
+  await requireUser();
+
+  const parsed = editReceivingSchema.safeParse({
+    receivingLogId: formData.get("receiving_log_id"),
+    quantityReceived: formData.get("quantity_received"),
+    receivedDate: formData.get("received_date"),
+    invoiceNumber: formData.get("invoice_number") ?? "",
+    conditionNotes: formData.get("condition_notes") ?? "",
+    note: formData.get("note") ?? "",
+  });
+
+  if (!parsed.success) {
+    await flashToast(parsed.error.issues[0]?.message ?? "Check the details and try again.", "error");
+    return;
+  }
+
+  const data = parsed.data;
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("edit_receiving", {
+    p_receiving_log_id: data.receivingLogId,
+    p_quantity_received: data.quantityReceived,
+    p_received_date: data.receivedDate,
+    p_invoice_number: data.invoiceNumber,
+    p_condition_notes: data.conditionNotes || null,
+    p_note: data.note || null,
+  });
+
+  if (error) {
+    await flashToast(error.message, "error");
+    return;
+  }
+
+  revalidatePath("/receiving");
+  revalidatePath("/orders");
+  revalidatePath("/approvals");
+  revalidatePath("/inventory");
+  await flashToast("Delivery updated.");
+}
+
 const directReceiptSchema = z.object({
   siteId: z.string().uuid(),
   shopkeeperId: z.string().min(1, "Choose the vendor these items came from."),

@@ -17,6 +17,8 @@ type PendingOrderRow = {
   status: OrderStatus;
   /** The line's own unit — receiving and approval stay in it. */
   unit: string;
+  /** Optional note entered with the line on the Orders tab. */
+  description: string | null;
   items: Rel<{ name: string }>;
 };
 
@@ -100,7 +102,7 @@ export default async function ApprovalsPage({
     // Lines oldest-first, so they list in the order entered on the PO.
     supabase
       .from("orders")
-      .select("id, purchase_order_id, quantity_ordered, unit, status, items ( name )")
+      .select("id, purchase_order_id, quantity_ordered, unit, description, status, items ( name )")
       .eq("site_id", selectedSiteId)
       .in("status", OPEN_STATUSES)
       .order("created_at"),
@@ -239,7 +241,7 @@ export default async function ApprovalsPage({
                     <div className="flex flex-wrap items-start justify-between gap-3">
                       <div>
                         <div className="flex flex-wrap items-center gap-2">
-                          <p className="text-base font-bold text-brand-navy">
+                          <p className="break-words text-base font-bold text-brand-navy">
                             {item?.name ?? "Unknown item"}{" "}
                             <span className="text-xs font-normal text-[#7b8494]">({order.unit})</span>
                           </p>
@@ -249,6 +251,9 @@ export default async function ApprovalsPage({
                             unit={order.unit}
                           />
                         </div>
+                        {order.description && (
+                          <p className="mt-0.5 text-xs text-[#7b8494]">{order.description}</p>
+                        )}
                         <p className="mt-0.5 text-xs text-[#6b7280]">
                           {isDirect
                             ? `Received: ${receivedTotal} ${order.unit} (no PO)`

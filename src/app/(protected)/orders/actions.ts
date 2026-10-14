@@ -9,9 +9,18 @@ import { lineSchema, readLines, resolveItemIds, resolveNewShopkeeper } from "@/l
 
 export type OrderFormState = { error: string | null; success: string | null };
 
+/** Today as YYYY-MM-DD in India time — the business's timezone. */
+function todayInIndia() {
+  return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata" }).format(new Date());
+}
+
 const newOrderSchema = z.object({
   siteId: z.string().min(1),
   poNumber: z.string().trim().min(1, "Enter the PO number for this order."),
+  placedDate: z
+    .string()
+    .min(1, "Pick the date this order was placed.")
+    .refine((d) => d <= todayInIndia(), "The order date can't be in the future."),
   shopkeeperId: z.string().min(1),
   newShopkeeperName: z.string().trim(),
   newShopkeeperPhone: z.string().trim(),
@@ -28,7 +37,7 @@ const addLineSchema = z.object({
  * Places a purchase order with one or more item lines. Handles the "add a
  * new item / vendor inline" option by inserting into the master tables
  * first, then writes the PO and all its lines in one go through the
- * create_purchase_order RPC (0012_purchase_orders.sql).
+ * create_purchase_order RPC (0020_po_placed_date.sql).
  */
 export async function createOrder(
   _prev: OrderFormState,
@@ -39,6 +48,7 @@ export async function createOrder(
   const parsed = newOrderSchema.safeParse({
     siteId: formData.get("site_id"),
     poNumber: formData.get("po_number") ?? "",
+    placedDate: formData.get("placed_date") ?? "",
     shopkeeperId: formData.get("shopkeeper_id"),
     newShopkeeperName: formData.get("new_shopkeeper_name") ?? "",
     newShopkeeperPhone: formData.get("new_shopkeeper_phone") ?? "",
@@ -108,10 +118,12 @@ export async function createOrder(
     p_site_id: data.siteId,
     p_po_number: data.poNumber,
     p_shopkeeper_id: shopkeeperId,
+    p_placed_date: data.placedDate,
     p_lines: data.lines.map((line, i) => ({
       item_id: itemIds[i],
       quantity_ordered: line.quantityOrdered,
       unit: line.unit,
+      description: line.description || null,
     })),
   });
 
@@ -176,6 +188,7 @@ export async function addOrderLine(
     p_quantity_ordered: lines[0].quantityOrdered,
     p_unit: lines[0].unit,
     p_note: note || null,
+    p_description: lines[0].description || null,
   });
 
   if (error) return { error: error.message, success: null };

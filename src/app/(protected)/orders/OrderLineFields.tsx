@@ -9,7 +9,8 @@ import { NEW_ID, SearchableSelect } from "@/components/ui/SearchableSelect";
 export type OrderItemOption = { id: string; name: string; unit: string };
 
 /**
- * One item line of a PO: item, quantity and that line's own unit. Field
+ * One item line of a PO: item, quantity, that line's own unit and (with
+ * `withDescription`) an optional short description. Field
  * names carry `lineKey` as a suffix (`quantity_ordered_2`) so a form can
  * hold several lines; the form also posts `line_keys` listing them, which
  * readLines() in actions.ts uses to read them back.
@@ -18,17 +19,21 @@ export function OrderLineFields({
   lineKey,
   items,
   savedWhen,
+  withDescription = false,
   onRemove,
 }: {
   lineKey: number;
   items: OrderItemOption[];
   savedWhen?: string;
+  /** Adds the optional description box under the line (Orders tab only). */
+  withDescription?: boolean;
   /** Shows a remove button for this line when given. */
   onRemove?: () => void;
 }) {
   // Field ids default to the field name, which repeats across the several
   // add-item forms on the Orders page — give each line its own.
   const quantityId = useId();
+  const descriptionId = useId();
   const [selectedItemId, setSelectedItemId] = useState("");
   const [orderUnit, setOrderUnit] = useState("");
 
@@ -105,6 +110,18 @@ export function OrderLineFields({
         </button>
       ) : (
         <span className="hidden sm:block sm:w-[72px]" />
+      )}
+
+      {withDescription && (
+        <div className="sm:col-span-3">
+          <Field
+            label="Description (optional)"
+            id={descriptionId}
+            name={`description_${lineKey}`}
+            maxLength={200}
+            placeholder="e.g. 25mm, ISI marked, brand Finolex"
+          />
+        </div>
       )}
     </div>
   );

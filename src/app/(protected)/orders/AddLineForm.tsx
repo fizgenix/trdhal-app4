@@ -30,7 +30,12 @@ export function AddLineForm({
     <form key={formKey} action={formAction} className="mt-3 flex flex-col gap-3">
       <input type="hidden" name="purchase_order_id" value={purchaseOrderId} />
       <input type="hidden" name="line_keys" value="0" />
-      <OrderLineFields lineKey={0} items={items} savedWhen="you add the item" />
+      <OrderLineFields
+        lineKey={0}
+        items={items}
+        savedWhen="you add the item"
+        withDescription
+      />
       <div className="flex flex-wrap items-end gap-3">
         <div className="w-64">
           <Field label="Reason (optional)" name="note" placeholder="e.g. missed on the PO" />

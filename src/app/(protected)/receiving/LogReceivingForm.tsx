@@ -4,11 +4,12 @@ import { useActionState, useState, useSyncExternalStore } from "react";
 import { Spinner } from "@/components/ui/Button";
 import { logReceiving, type ReceivingFormState } from "./actions";
 import { OverReceivedBadge } from "@/components/OverReceivedBadge";
+import { RECEIVING_COLUMNS } from "./columns";
 
 const initialState: ReceivingFormState = { error: null, success: null };
 
-const ROW_GRID =
-  "grid grid-cols-[44px_1.3fr_0.9fr_0.8fr_0.8fr_0.9fr_1fr_auto] items-center gap-2.5 px-5 py-3.5";
+
+const ROW_GRID = `grid ${RECEIVING_COLUMNS} items-center gap-2.5 px-5 py-3.5`;
 
 /** Today's date in the browser's own timezone, as YYYY-MM-DD. */
 function localToday() {
@@ -56,14 +57,19 @@ function ProgressRing({ percent }: { percent: number }) {
 export function LogReceivingForm({
   orderId,
   itemName,
+  description,
   itemUnit,
+  orderDate,
   quantityOrdered,
   receivedSoFar,
   remainingQuantity,
 }: {
   orderId: string;
   itemName: string;
+  description?: string | null;
   itemUnit?: string;
+  /** The PO's order date, YYYY-MM-DD in India time — the earliest received date allowed. */
+  orderDate: string;
   quantityOrdered: number;
   receivedSoFar: number;
   remainingQuantity: number;
@@ -97,7 +103,8 @@ export function LogReceivingForm({
       <ProgressRing percent={percent} />
 
       <div className="min-w-0">
-        <div className="truncate text-sm font-bold text-brand-navy">
+        {/* Long names wrap in full rather than being cut off. */}
+        <div className="break-words text-sm font-bold text-brand-navy">
           {itemName}{" "}
           {itemUnit && (
             <span className="font-normal text-gray-400">({itemUnit})</span>
@@ -113,7 +120,7 @@ export function LogReceivingForm({
       <div
         className={`text-xs ${receivedSoFar > quantityOrdered ? "font-bold text-red-700" : "text-[#6b7280]"}`}
       >
-        {quantityOrdered} / {receivedSoFar}
+        {receivedSoFar} / {quantityOrdered}
       </div>
 
       <input
@@ -132,8 +139,10 @@ export function LogReceivingForm({
         name="received_date"
         type="date"
         defaultValue={today}
-        // Deliveries can't be logged ahead of time — future days are greyed
-        // out in the picker (also enforced in logReceiving and the DB).
+        // Deliveries can't be logged ahead of time or before the order
+        // date — those days are greyed out in the picker. logReceiving
+        // re-checks the future limit and the DB enforces both.
+        min={orderDate}
         max={today}
         required
         className={inputClass}
@@ -158,7 +167,7 @@ export function LogReceivingForm({
         type="submit"
         disabled={isPending}
         aria-busy={isPending || undefined}
-        className="inline-flex items-center gap-1.5 rounded-full border border-brand-navy px-3.5 py-2 text-xs font-bold text-brand-navy hover:bg-brand-navy hover:text-white disabled:cursor-not-allowed disabled:border-gray-200 disabled:text-gray-300 disabled:hover:bg-transparent"
+        className="inline-flex items-center gap-1.5 justify-self-end rounded-full border border-brand-navy px-3.5 py-2 text-xs font-bold text-brand-navy hover:bg-brand-navy hover:text-white disabled:cursor-not-allowed disabled:border-gray-200 disabled:text-gray-300 disabled:hover:bg-transparent"
       >
         {isPending ? (
           <>
@@ -169,6 +178,14 @@ export function LogReceivingForm({
           "Log"
         )}
       </button>
+
+      {/* The description gets its own full-width line under the row, lined
+          up with the item name, so a long spec stays readable. */}
+      {description && (
+        <p className="col-span-full -mt-1.5 break-words pl-[54px] text-xs text-[#7b8494]">
+          {description}
+        </p>
+      )}
 
       {overBy > 0 && (
         <p className="col-span-full rounded-lg border border-red-300 bg-red-50 px-3 py-2 text-xs font-bold text-red-700">
