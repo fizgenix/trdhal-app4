@@ -3,8 +3,9 @@ import { createClient } from "@/lib/supabase/server";
 import { SiteSwitcher } from "@/components/SiteSwitcher";
 import { resolveSelectedSiteId } from "@/lib/selected-site";
 import { lineDisplayStatus, StatusBadge } from "@/components/StatusBadge";
-import { ApproveOrderForm } from "./ApproveOrderForm";
-import { OverReceivedBadge } from "@/components/OverReceivedBadge";
+import { ApprovalActions } from "./ApprovalActions";
+import { ActionRow } from "../orders/ActionRow";
+import { OrderSearchBox } from "../orders/OrderSearchBox";
 import type { OrderStatus } from "@/types/database";
 
 type Rel<T> = T | T[] | null;
@@ -56,6 +57,15 @@ function one<T>(rel: Rel<T>): T | null {
   return Array.isArray(rel) ? (rel[0] ?? null) : rel;
 }
 
+/** "2,31,232" — Indian digit grouping, up to 2 decimals. */
+function formatQty(n: number) {
+  return Number(n).toLocaleString("en-IN", { maximumFractionDigits: 2 });
+}
+
+/** Columns: ID, item, qty to approve, logged by, then remarks + action (one form). */
+const ROW_GRID =
+  "grid gap-x-4 gap-y-2 md:grid-cols-[210px_minmax(0,1.6fr)_100px_140px_minmax(0,1fr)_210px]";
+
 function formatDate(iso: string) {
   return new Date(iso).toLocaleDateString("en-IN", {
     day: "numeric",
@@ -67,10 +77,10 @@ function formatDate(iso: string) {
 export default async function ApprovalsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ site?: string }>;
+  searchParams: Promise<{ site?: string; q?: string }>;
 }) {
   const user = await requireUser();
-  const { site: siteParam } = await searchParams;
+  const { site: siteParam, q: qParam } = await searchParams;
   const supabase = await createClient();
 
   const sites = user.sites;
@@ -167,9 +177,154 @@ export default async function ApprovalsPage({
     );
   }
 
+  // POs first (newest first), then direct receipts — each MISC receipt is
+  // its own "PO", so they're grouped by vendor instead.
+  const regularPos = purchaseOrders.filter((po) => po.kind === "po");
+  const directByVendor = new Map<string, PurchaseOrderRow[]>();
+  for (const po of purchaseOrders.filter((p) => p.kind === "direct")) {
+    const vendor = one(po.shopkeepers)?.name ?? "No vendor";
+    directByVendor.set(vendor, [...(directByVendor.get(vendor) ?? []), po]);
+  }
+  const groups = [
+    ...regularPos.map((po) => ({ key: po.id, direct: false, pos: [po] })),
+    ...Array.from(directByVendor, ([vendor, pos]) => ({ key: `direct-${vendor}`, direct: true, pos })),
+  ];
+
+  // Search matches a PO's number or vendor (showing all its items), or
+  // else an item, receipt number, invoice or who logged it (showing just
+  // the matching items).
+  const q = (qParam ?? "").trim().toLowerCase();
+  const has = (v: string | null | undefined) => !!v && v.toLowerCase().includes(q);
+  const visibleGroups = groups.flatMap((group) => {
+    const lines = group.pos.flatMap((po) =>
+      (linesByPo.get(po.id) ?? []).map((order) => ({ po, order })),
+    );
+    if (!q) return [{ ...group, lines }];
+    const first = group.pos[0];
+    if ((!group.direct && has(first.po_number)) || has(one(first.shopkeepers)?.name)) {
+      return [{ ...group, lines }];
+    }
+    const matching = lines.filter(
+      ({ po, order }) =>
+        has(one(order.items)?.name) ||
+        has(po.po_number) ||
+        (logsByOrder.get(order.id) ?? []).some(
+          (l) => has(l.invoice_number) || has(one(l.profiles)?.full_name),
+        ),
+    );
+    return matching.length > 0 ? [{ ...group, lines: matching }] : [];
+  });
+
+  function renderLine(po: PurchaseOrderRow, order: PendingOrderRow) {
+    const isDirect = po.kind === "direct";
+    const item = one(order.items);
+    const orderLogs = logsByOrder.get(order.id) ?? [];
+    const lastLog = orderLogs[orderLogs.length - 1];
+    const invoices = Array.from(new Set(orderLogs.map((l) => l.invoice_number).filter(Boolean)));
+    const receivedTotal = receivedTotalByOrder.get(order.id) ?? 0;
+    const isFullyReceived = receivedTotal >= order.quantity_ordered;
+    const overBy = receivedTotal - order.quantity_ordered;
+    const approvedTotal = approvedTotalByOrder.get(order.id) ?? 0;
+    const orderApprovals = approvalsByOrder.get(order.id) ?? [];
+    // Received but not yet approved — what the Approve button covers.
+    const toApprove = Number((receivedTotal - approvedTotal).toFixed(4));
+    const shortBy = order.quantity_ordered - receivedTotal;
+    const notes = orderLogs.map((l) => l.condition_notes).filter(Boolean);
+
+    return (
+      <div
+        key={order.id}
+        className={`${ROW_GRID} items-center px-4 py-3 ${overBy > 0 ? "bg-red-50/60" : ""}`}
+      >
+        <p className="font-mono text-xs font-bold text-brand-navy [overflow-wrap:anywhere] md:whitespace-nowrap md:[overflow-wrap:normal]">
+          {po.po_number}
+        </p>
+
+        <div className="min-w-0">
+          <p className="break-words text-sm font-bold text-brand-navy">
+            {item?.name ?? "Unknown item"}{" "}
+            <span className="font-normal text-[#7b8494]">({order.unit})</span>
+          </p>
+          {order.description && (
+            <p className="break-words text-xs text-[#7b8494]">{order.description}</p>
+          )}
+          <p className="text-xs text-[#6b7280]">
+            {isDirect
+              ? `Received: ${formatQty(receivedTotal)} ${order.unit} (no PO)`
+              : `${formatQty(receivedTotal)} of ${formatQty(order.quantity_ordered)} ${order.unit} received${
+                  shortBy > 0 ? ` · ${formatQty(shortBy)} still due` : ""
+                }`}
+          </p>
+          {overBy > 0 && (
+            <p className="text-xs font-bold text-red-700">
+              ▲ Over-received by {formatQty(overBy)} {order.unit} — check with the site and vendor
+              before approving, and note the outcome in the remarks.
+            </p>
+          )}
+          {orderApprovals.length > 0 && (
+            <p
+              className="text-xs text-green-700"
+              title={orderApprovals
+                .map(
+                  (a) =>
+                    `${formatQty(a.quantity_approved)} ${order.unit} by ${one(a.profiles)?.full_name ?? "Unknown"} on ${formatDate(a.approved_date)}`,
+                )
+                .join("\n")}
+            >
+              {formatQty(approvedTotal)} {order.unit} approved already
+            </p>
+          )}
+          {notes.length > 0 && (
+            <p className="break-words text-xs italic text-[#7b8494]">
+              {notes.map((n) => `“${n}”`).join(" · ")}
+            </p>
+          )}
+        </div>
+
+        <p className="text-sm font-bold text-brand-navy">
+          <span className="font-normal text-[#7b8494] md:hidden">To approve: </span>
+          {toApprove > 0 ? `${formatQty(toApprove)} ${order.unit}` : "—"}
+        </p>
+
+        <div className="text-[13px]">
+          {lastLog ? (
+            <>
+              <p className="text-brand-navy">{one(lastLog.profiles)?.full_name ?? "Unknown"}</p>
+              <p className="text-[11px] text-[#7b8494]">
+                {formatDate(lastLog.received_date)}
+                {orderLogs.length > 1 && ` · ${orderLogs.length} deliveries`}
+              </p>
+              {invoices.length > 0 && (
+                <p className="text-[11px] text-[#7b8494]">Inv {invoices.join(", ")}</p>
+              )}
+            </>
+          ) : (
+            <p className="text-[#7b8494]">No deliveries yet</p>
+          )}
+        </div>
+
+        {canApproveHere ? (
+          <ApprovalActions
+            orderId={order.id}
+            canApprove={toApprove > 0}
+            canReject={isDirect && toApprove > 0}
+            closeShortLabel={
+              !isFullyReceived ? `Close short at ${formatQty(receivedTotal)} ${order.unit}` : undefined
+            }
+            waitingLabel={`Waiting on ${formatQty(shortBy)} ${order.unit}`}
+          />
+        ) : (
+          <div className="col-span-full flex justify-end md:col-span-2">
+            <StatusBadge status={lineDisplayStatus(order.status, approvedTotal)} />
+          </div>
+        )}
+      </div>
+    );
+  }
+
   return (
-    <div className="flex flex-col gap-8">
-      <div className="flex flex-wrap items-center justify-between gap-4">
+    <div className="flex flex-col gap-6">
+      <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <h1 className="text-2xl font-extrabold text-brand-navy">Approvals</h1>
           <p className="text-[#6b7280]">
@@ -177,9 +332,16 @@ export default async function ApprovalsPage({
             isn&apos;t coming.
           </p>
         </div>
-        {sites.length > 1 && (
-          <SiteSwitcher basePath="/approvals" sites={sites} selectedSiteId={selectedSiteId} />
-        )}
+        <div className="flex flex-wrap items-center gap-3">
+          {pendingOrders.length > 0 && (
+            <span className="rounded-full border border-orange-300 bg-orange-50 px-3 py-1.5 text-[13px] font-bold text-orange-800">
+              {pendingOrders.length} waiting for approval
+            </span>
+          )}
+          {sites.length > 1 && (
+            <SiteSwitcher basePath="/approvals" sites={sites} selectedSiteId={selectedSiteId} />
+          )}
+        </div>
       </div>
 
       {!canApproveHere && (
@@ -189,226 +351,93 @@ export default async function ApprovalsPage({
         </p>
       )}
 
-      <div className="flex flex-col gap-4">
-        {purchaseOrders.map((po) => {
-          const shopkeeper = one(po.shopkeepers);
-          const placedByProfile = one(po.profiles);
-          const isDirect = po.kind === "direct";
+      {pendingOrders.length === 0 ? (
+        <p className="rounded-2xl border border-dashed border-brand-border bg-white p-8 text-center text-[#7b8494]">
+          No orders are waiting on approval at this site right now.
+        </p>
+      ) : (
+        <div className="flex flex-col gap-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <p className="text-xs text-[#7b8494]">
+              Grouped by purchase order. Direct receipts have no PO and are grouped by vendor.
+            </p>
+            <div className="w-full sm:w-80">
+              <OrderSearchBox
+                basePath="/approvals"
+                siteId={selectedSiteId}
+                defaultValue={qParam ?? ""}
+                placeholder="Search PO, vendor, item or invoice…"
+              />
+            </div>
+          </div>
 
-          return (
-            <section key={po.id} className="flex flex-col gap-3">
-              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 px-1">
-                <span className="rounded-full border border-brand-border bg-brand-cream px-2.5 py-0.5 font-mono text-[12px] font-bold text-brand-navy">
-                  {po.po_number}
-                </span>
-                {isDirect && (
-                  <span className="rounded-full bg-purple-100 px-2.5 py-0.5 text-[11px] font-bold text-purple-800">
-                    Direct Receipt
-                  </span>
-                )}
-                <span className="text-sm font-bold text-brand-navy">
-                  {shopkeeper?.name ?? (isDirect ? "No vendor" : "Unknown vendor")}
-                </span>
-                <span className="text-xs text-[#7b8494]">
-                  {isDirect ? "Logged" : "Placed"} by {placedByProfile?.full_name ?? "Unknown"} on{" "}
-                  {formatDate(po.placed_date)}
-                </span>
-              </div>
-
-              {(linesByPo.get(po.id) ?? []).map((order) => {
-                const item = one(order.items);
-                const orderLogs = logsByOrder.get(order.id) ?? [];
-                const receivedTotal = receivedTotalByOrder.get(order.id) ?? 0;
-                const isFullyReceived = receivedTotal >= order.quantity_ordered;
-                const overBy = receivedTotal - order.quantity_ordered;
-                const approvedTotal = approvedTotalByOrder.get(order.id) ?? 0;
-                const orderApprovals = approvalsByOrder.get(order.id) ?? [];
-                // Received but not yet approved — what the Approve button covers.
-                const toApprove = Number((receivedTotal - approvedTotal).toFixed(4));
-                const shortBy = order.quantity_ordered - receivedTotal;
-
-                return (
-                  <div
-                    key={order.id}
-                    className={`rounded-2xl border border-brand-border bg-white p-5 shadow-sm ${
-                      overBy > 0
-                        ? "border-2 border-red-400"
-                        : toApprove > 0
-                          ? ""
-                          : "border-dashed bg-[#fbfaf6]"
-                    }`}
-                  >
-                    <div className="flex flex-wrap items-start justify-between gap-3">
-                      <div>
-                        <div className="flex flex-wrap items-center gap-2">
-                          <p className="break-words text-base font-bold text-brand-navy">
-                            {item?.name ?? "Unknown item"}{" "}
-                            <span className="text-xs font-normal text-[#7b8494]">({order.unit})</span>
-                          </p>
-                          <OverReceivedBadge
-                            ordered={order.quantity_ordered}
-                            received={receivedTotal}
-                            unit={order.unit}
-                          />
-                        </div>
-                        {order.description && (
-                          <p className="mt-0.5 text-xs text-[#7b8494]">{order.description}</p>
-                        )}
-                        <p className="mt-0.5 text-xs text-[#6b7280]">
-                          {isDirect
-                            ? `Received: ${receivedTotal} ${order.unit} (no PO)`
-                            : `Ordered: ${order.quantity_ordered} ${order.unit} · Received: ${receivedTotal} ${order.unit} · Approved: ${approvedTotal} ${order.unit}`}
-                        </p>
-                      </div>
-                      <StatusBadge status={lineDisplayStatus(order.status, approvedTotal)} />
-                    </div>
-
-                    <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-[#efebe2]">
-                      <div
-                        className={`h-full ${overBy > 0 ? "bg-red-500" : isFullyReceived ? "bg-status-completed" : "bg-status-pending"}`}
-                        style={{
-                          width: `${Math.min(100, (receivedTotal / order.quantity_ordered) * 100)}%`,
-                        }}
-                      />
-                    </div>
-
-                    <div className="mt-4 border-t border-brand-border-soft pt-4">
-                      <p className="mb-2 text-[10.5px] font-bold uppercase tracking-wider text-[#8a836f]">
-                        Delivery log ({orderLogs.length})
-                      </p>
-                      {orderLogs.length === 0 ? (
-                        <p className="text-sm text-[#7b8494]">No deliveries logged yet.</p>
-                      ) : (
-                        <ul className="space-y-1 text-sm text-[#4b5563]">
-                          {orderLogs.map((log) => {
-                            const receiver = one(log.profiles);
-                            return (
-                              <li key={log.id}>
-                                {log.quantity_received} {order.unit} on {formatDate(log.received_date)}{" "}
-                                — logged by {receiver?.full_name ?? "Unknown"}
-                                {log.invoice_number && (
-                                  <span className="text-[#7b8494]"> · Invoice {log.invoice_number}</span>
-                                )}
-                                {log.condition_notes && (
-                                  <span className="text-[#7b8494]"> · &quot;{log.condition_notes}&quot;</span>
-                                )}
-                              </li>
-                            );
-                          })}
-                        </ul>
-                      )}
-
-                      {orderApprovals.length > 0 && (
-                        <>
-                          <p className="mb-2 mt-4 text-[10.5px] font-bold uppercase tracking-wider text-[#8a836f]">
-                            Approved so far ({orderApprovals.length})
-                          </p>
-                          <ul className="space-y-1 text-sm text-[#4b5563]">
-                            {orderApprovals.map((approval) => (
-                              <li key={approval.id}>
-                                {approval.quantity_approved} {order.unit} on{" "}
-                                {formatDate(approval.approved_date)} — approved by{" "}
-                                {one(approval.profiles)?.full_name ?? "Unknown"}
-                                {approval.remarks && (
-                                  <span className="text-[#7b8494]"> · &quot;{approval.remarks}&quot;</span>
-                                )}
-                              </li>
-                            ))}
-                          </ul>
-                        </>
-                      )}
-                    </div>
-
-                    {overBy > 0 && (
-                      <p className="mt-4 rounded-lg border border-red-300 bg-red-50 px-4 py-3 text-sm font-bold text-red-700">
-                        ▲ Over-received: {receivedTotal} {order.unit} delivered against{" "}
-                        {order.quantity_ordered} {order.unit} ordered (+
-                        {Number(overBy.toFixed(2))} {order.unit}). Check with the site and vendor
-                        before approving — note the outcome in the remarks.
-                      </p>
+          {visibleGroups.map((group, index) => {
+            const first = group.pos[0];
+            const shopkeeper = one(first.shopkeepers);
+            return (
+              <ActionRow
+                key={group.key}
+                // Only the first card opens by default — all of them while
+                // searching, since the results are already narrowed down.
+                defaultExpanded={index === 0 || !!q}
+                className="overflow-hidden rounded-2xl border border-brand-border bg-white shadow-sm"
+                rowClassName="bg-brand-content px-4 py-2.5"
+                summary={
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                    {group.direct ? (
+                      <>
+                        <span className="rounded-full border border-purple-300 bg-purple-50 px-2.5 py-0.5 text-[11px] font-bold text-purple-800">
+                          Direct receipt
+                        </span>
+                        <span className="text-sm font-bold text-brand-navy">
+                          {shopkeeper?.name ?? "No vendor"}
+                        </span>
+                        <span className="text-xs text-[#7b8494]">No PO · logged on site</span>
+                      </>
+                    ) : (
+                      <>
+                        <span className="rounded-full border border-amber-300 bg-amber-50 px-2.5 py-0.5 text-[11px] font-bold text-amber-800">
+                          Purchase order
+                        </span>
+                        <span className="text-sm font-bold text-brand-navy">
+                          {first.po_number} · {shopkeeper?.name ?? "Unknown vendor"}
+                        </span>
+                        <span className="text-xs text-[#7b8494]">
+                          Placed by {one(first.profiles)?.full_name ?? "Unknown"} on{" "}
+                          {formatDate(first.placed_date)}
+                        </span>
+                      </>
                     )}
-
-                    {canApproveHere && (
-                      <div className="mt-4 flex flex-col gap-3 border-t border-brand-border-soft pt-4">
-                        {toApprove > 0 ? (
-                          <ApproveOrderForm
-                            orderId={order.id}
-                            label={
-                              isFullyReceived
-                                ? `Approve ${toApprove} ${order.unit} & complete`
-                                : `Approve ${toApprove} ${order.unit} received`
-                            }
-                          />
-                        ) : (
-                          <p className="rounded-lg bg-orange-50 px-4 py-3 text-sm font-medium text-orange-800">
-                            Everything received so far is approved — waiting on the remaining{" "}
-                            {Number(shortBy.toFixed(2))} {order.unit} to be delivered.
-                          </p>
-                        )}
-
-                        {isDirect && toApprove > 0 && (
-                          <details>
-                            <summary className="cursor-pointer text-sm font-semibold text-red-600">
-                              Don&apos;t recognise this? Reject it
-                            </summary>
-                            <div className="mt-3 flex flex-col gap-3">
-                              <p className="text-xs text-[#6b7280]">
-                                Rejected items are not added to stock. The reason is shown to the
-                                receiving team.
-                              </p>
-                              <ApproveOrderForm
-                                orderId={order.id}
-                                reject
-                                label="Reject item"
-                                remarksPlaceholder="e.g. not authorised, no bill provided"
-                              />
-                            </div>
-                          </details>
-                        )}
-
-                        {!isFullyReceived && toApprove > 0 && (
-                          <p className="text-xs text-[#7b8494]">
-                            Approving now keeps this item open for the remaining{" "}
-                            {Number(shortBy.toFixed(2))} {order.unit}.
-                          </p>
-                        )}
-
-                        {!isFullyReceived && (
-                          <details>
-                            <summary className="cursor-pointer text-sm font-semibold text-red-600">
-                              Not expecting the rest? Close short at {receivedTotal} {order.unit}
-                            </summary>
-                            <div className="mt-3 flex flex-col gap-3">
-                              <p className="text-xs text-[#6b7280]">
-                                Accepts {receivedTotal} of {order.quantity_ordered} {order.unit} as
-                                final and completes this item — short by{" "}
-                                {Number(shortBy.toFixed(2))} {order.unit}. No more deliveries can be
-                                logged against it.
-                              </p>
-                              <ApproveOrderForm
-                                orderId={order.id}
-                                closeShort
-                                label="Close short & complete"
-                                remarksPlaceholder="e.g. vendor out of stock, balance cancelled"
-                              />
-                            </div>
-                          </details>
-                        )}
-                      </div>
-                    )}
+                    <span className="ml-auto rounded-full border border-brand-border-soft bg-white px-2 py-0.5 text-[11px] font-bold text-[#4b5563]">
+                      {group.lines.length} item{group.lines.length === 1 ? "" : "s"}
+                    </span>
                   </div>
-                );
-              })}
-            </section>
-          );
-        })}
+                }
+              >
+                <div
+                  className={`${ROW_GRID} hidden border-y border-brand-border-soft px-4 py-2 text-[10.5px] font-bold uppercase tracking-wider text-[#8a836f] md:grid`}
+                >
+                  <div>ID</div>
+                  <div>Item</div>
+                  <div>Qty</div>
+                  <div>Logged by</div>
+                  <div>Remarks</div>
+                  <div className="text-right">{canApproveHere ? "Action" : "Status"}</div>
+                </div>
+                <div className="divide-y divide-brand-border-soft border-t border-brand-border-soft md:border-t-0">
+                  {group.lines.map(({ po, order }) => renderLine(po, order))}
+                </div>
+              </ActionRow>
+            );
+          })}
 
-        {pendingOrders.length === 0 && (
-          <p className="rounded-2xl border border-dashed border-brand-border bg-white p-8 text-center text-[#7b8494]">
-            No orders are waiting on approval at this site right now.
-          </p>
-        )}
-      </div>
+          {visibleGroups.length === 0 && (
+            <p className="rounded-2xl border border-dashed border-brand-border bg-white p-8 text-center text-[#7b8494]">
+              Nothing waiting on approval matches “{qParam}”.
+            </p>
+          )}
+        </div>
+      )}
     </div>
   );
 }

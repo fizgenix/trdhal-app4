@@ -20,6 +20,7 @@ export function OrderLineFields({
   items,
   savedWhen,
   withDescription = false,
+  inline = false,
   onRemove,
 }: {
   lineKey: number;
@@ -27,6 +28,12 @@ export function OrderLineFields({
   savedWhen?: string;
   /** Adds the optional description box under the line (Orders tab only). */
   withDescription?: boolean;
+  /**
+   * One row under a column-header strip (New order form): labels are
+   * hidden on desktop, where the strip names the columns, and the
+   * description sits in the same row instead of below.
+   */
+  inline?: boolean;
   /** Shows a remove button for this line when given. */
   onRemove?: () => void;
 }) {
@@ -55,8 +62,26 @@ export function OrderLineFields({
     if (usual) setOrderUnit(usual);
   }
 
+  const labelClassName = inline ? "sm:sr-only" : "";
+  const description = (
+    <Field
+      label="Description (optional)"
+      id={descriptionId}
+      name={`description_${lineKey}`}
+      maxLength={200}
+      placeholder="e.g. 25mm, ISI marked, brand Finolex"
+      labelClassName={labelClassName}
+    />
+  );
+
   return (
-    <div className="grid items-start gap-3 sm:grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1fr)_auto]">
+    <div
+      className={`grid items-start gap-3 ${
+        inline && withDescription
+          ? "sm:grid-cols-[minmax(0,2fr)_minmax(0,0.8fr)_minmax(0,1fr)_minmax(0,2fr)_auto]"
+          : "sm:grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1fr)_auto]"
+      }`}
+    >
       <SearchableSelect
         label="Item"
         name={`item_id_${lineKey}`}
@@ -67,6 +92,7 @@ export function OrderLineFields({
         options={items.map((i) => ({ id: i.id, name: i.name, label: i.name }))}
         onSelect={handleItemSelect}
         savedWhen={savedWhen}
+        labelClassName={labelClassName}
       />
 
       <Field
@@ -79,6 +105,7 @@ export function OrderLineFields({
         placeholder="e.g. 250"
         required
         suffix={orderUnit || undefined}
+        labelClassName={labelClassName}
       />
 
       {/* The line's unit — fixed once placed: its receiving, approval and
@@ -97,32 +124,25 @@ export function OrderLineFields({
         canonicalize={canonicalUnit}
         onSelect={(id, text) => setOrderUnit(id === NEW_ID ? text.trim() : id)}
         savedWhen={savedWhen}
+        labelClassName={labelClassName}
       />
+
+      {inline && withDescription && description}
 
       {onRemove ? (
         <button
           type="button"
           onClick={onRemove}
           aria-label="Remove this item"
-          className="self-end rounded-full px-3 py-2.5 text-sm font-bold text-red-600 hover:bg-red-50 sm:mb-0.5"
+          className={`rounded-full px-3 py-2.5 text-sm font-bold text-red-600 hover:bg-red-50 ${inline ? "justify-self-start sm:w-[78px]" : "self-end sm:mb-0.5"}`}
         >
           Remove
         </button>
       ) : (
-        <span className="hidden sm:block sm:w-[72px]" />
+        <span className={`hidden sm:block ${inline ? "sm:w-[78px]" : "sm:w-[72px]"}`} />
       )}
 
-      {withDescription && (
-        <div className="sm:col-span-3">
-          <Field
-            label="Description (optional)"
-            id={descriptionId}
-            name={`description_${lineKey}`}
-            maxLength={200}
-            placeholder="e.g. 25mm, ISI marked, brand Finolex"
-          />
-        </div>
-      )}
+      {withDescription && !inline && <div className="sm:col-span-3">{description}</div>}
     </div>
   );
 }

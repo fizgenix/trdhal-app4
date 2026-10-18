@@ -4,15 +4,17 @@ type FieldProps = InputHTMLAttributes<HTMLInputElement> & {
   label: string;
   /** Shown inside the box on the right, e.g. the unit next to a quantity. */
   suffix?: ReactNode;
+  /** Extra classes for the label — e.g. "sm:sr-only" under a table header row. */
+  labelClassName?: string;
 };
 
-export function Field({ label, id, name, suffix, className = "", ...props }: FieldProps) {
+export function Field({ label, id, name, suffix, labelClassName = "", className = "", ...props }: FieldProps) {
   const fieldId = id ?? name;
   return (
     <div className="flex flex-col gap-1.5">
       <label
         htmlFor={fieldId}
-        className="text-[10.5px] font-bold uppercase tracking-wider text-[#6b6553]"
+        className={`text-[10.5px] font-bold uppercase tracking-wider text-[#6b6553] ${labelClassName}`}
       >
         {label}
       </label>

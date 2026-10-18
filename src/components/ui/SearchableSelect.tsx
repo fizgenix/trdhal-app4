@@ -40,6 +40,7 @@ export function SearchableSelect({
   canonicalize = (s) => s,
   onSelect,
   allowNew = true,
+  labelClassName = "",
 }: {
   label: string;
   name: string;
@@ -66,6 +67,8 @@ export function SearchableSelect({
   onSelect?: (id: string, text: string) => void;
   /** false = only existing options can be picked; no "+ Add …" row. */
   allowNew?: boolean;
+  /** Extra classes for the label — e.g. "sm:sr-only" under a table header row. */
+  labelClassName?: string;
 }) {
   const fieldId = useId();
   const listId = `${fieldId}-list`;
@@ -172,7 +175,7 @@ export function SearchableSelect({
     <div ref={containerRef} className="relative flex flex-col gap-1.5" onBlur={handleBlur}>
       <label
         htmlFor={fieldId}
-        className="text-[10.5px] font-bold uppercase tracking-wider text-[#6b6553]"
+        className={`text-[10.5px] font-bold uppercase tracking-wider text-[#6b6553] ${labelClassName}`}
       >
         {label}
       </label>

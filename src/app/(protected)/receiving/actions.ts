@@ -139,6 +139,7 @@ const directReceiptSchema = z.object({
     .min(1, "Pick the date these items arrived.")
     .refine((d) => d <= todayInIndia(), "The received date can't be in the future."),
   invoiceNumber: z.string().trim(),
+  notes: z.string().trim().max(500),
   lines: z.array(lineSchema).min(1, "Add at least one item."),
 });
 
@@ -160,6 +161,7 @@ export async function logDirectReceipt(
     newShopkeeperName: formData.get("new_shopkeeper_name") ?? "",
     receivedDate: formData.get("received_date"),
     invoiceNumber: formData.get("invoice_number") ?? "",
+    notes: formData.get("notes") ?? "",
     lines: readLines(formData),
   });
 
@@ -197,7 +199,7 @@ export async function logDirectReceipt(
       p_shopkeeper_id: shopkeeperId,
       p_received_date: data.receivedDate,
       p_invoice_number: data.invoiceNumber || null,
-      p_notes: null,
+      p_notes: data.notes || null,
       p_lines: data.lines.map((line, i) => ({
         item_id: itemIds[i],
         quantity: line.quantityOrdered,

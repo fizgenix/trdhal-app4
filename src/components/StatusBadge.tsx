@@ -32,7 +32,7 @@ const STATUS_LABELS: Record<DisplayStatus, string> = {
 export function StatusBadge({ status }: { status: DisplayStatus }) {
   return (
     <span
-      className={`inline-block shrink-0 rounded-full px-3.5 py-1.5 text-xs font-bold ${STATUS_STYLES[status]}`}
+      className={`inline-block shrink-0 whitespace-nowrap rounded-full px-3.5 py-1.5 text-xs font-bold ${STATUS_STYLES[status]}`}
     >
       {STATUS_LABELS[status]}
     </span>

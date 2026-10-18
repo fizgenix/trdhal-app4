@@ -3,13 +3,9 @@
 import { useActionState, useState, useSyncExternalStore } from "react";
 import { Spinner } from "@/components/ui/Button";
 import { logReceiving, type ReceivingFormState } from "./actions";
-import { OverReceivedBadge } from "@/components/OverReceivedBadge";
-import { RECEIVING_COLUMNS } from "./columns";
 
 const initialState: ReceivingFormState = { error: null, success: null };
 
-
-const ROW_GRID = `grid ${RECEIVING_COLUMNS} items-center gap-2.5 px-5 py-3.5`;
 
 /** Today's date in the browser's own timezone, as YYYY-MM-DD. */
 function localToday() {
@@ -30,48 +26,17 @@ function useToday() {
   return useSyncExternalStore(noopSubscribe, localToday, () => undefined);
 }
 
-/** `percent` can pass 100 on an over-received line — the ring turns red and shows it. */
-function ProgressRing({ percent }: { percent: number }) {
-  const color =
-    percent > 100
-      ? "#dc2626"
-      : percent >= 100
-      ? "var(--color-status-completed)"
-      : percent > 0
-        ? "var(--color-status-pending)"
-        : "#e5e7eb";
-  return (
-    <div
-      className="flex h-9 w-9 items-center justify-center rounded-full border-[1.5px] border-[#d3cbb9] text-[9px] font-bold text-brand-navy"
-      style={{
-        background: `conic-gradient(${color} ${Math.min(percent, 100) * 3.6}deg, #efebe2 ${Math.min(percent, 100) * 3.6}deg 360deg)`,
-      }}
-    >
-      <span className="flex h-6 w-6 items-center justify-center rounded-full bg-white">
-        {percent}%
-      </span>
-    </div>
-  );
-}
-
+/** The Receive tab of an open item on the Receiving page: one delivery's details. */
 export function LogReceivingForm({
   orderId,
-  itemName,
-  description,
   itemUnit,
   orderDate,
-  quantityOrdered,
-  receivedSoFar,
   remainingQuantity,
 }: {
   orderId: string;
-  itemName: string;
-  description?: string | null;
   itemUnit?: string;
   /** The PO's order date, YYYY-MM-DD in India time — the earliest received date allowed. */
   orderDate: string;
-  quantityOrdered: number;
-  receivedSoFar: number;
   remainingQuantity: number;
 }) {
   const [state, formAction, isPending] = useActionState(logReceiving, initialState);
@@ -90,84 +55,67 @@ export function LogReceivingForm({
     }
   }
 
-  const percent = Math.round((receivedSoFar / quantityOrdered) * 100);
   // Over-receiving is allowed (vendors do send extra) — warned, not blocked.
   const overBy = Number(quantity) - Math.max(remainingQuantity, 0);
   const inputClass =
-    "w-full rounded-lg border border-brand-input-border px-2.5 py-2 text-xs text-brand-navy placeholder:text-gray-400 focus:border-brand-gold focus:outline-none focus:ring-2 focus:ring-brand-gold/40";
+    "w-full rounded-lg border border-brand-input-border bg-white px-2.5 py-2 text-sm text-brand-navy placeholder:text-gray-400 focus:border-brand-gold focus:outline-none focus:ring-2 focus:ring-brand-gold/40";
+
+  const labelClass = "text-[10.5px] font-bold uppercase tracking-wider text-[#6b6553]";
 
   return (
-    <form key={formKey} action={formAction} className={ROW_GRID}>
+    <form
+      key={formKey}
+      action={formAction}
+      className="grid items-end gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,2.4fr)_auto]"
+    >
       <input type="hidden" name="order_id" value={orderId} />
 
-      <ProgressRing percent={percent} />
-
-      <div className="min-w-0">
-        {/* Long names wrap in full rather than being cut off. */}
-        <div className="break-words text-sm font-bold text-brand-navy">
-          {itemName}{" "}
-          {itemUnit && (
-            <span className="font-normal text-gray-400">({itemUnit})</span>
-          )}
-        </div>
-        <OverReceivedBadge
-          ordered={quantityOrdered}
-          received={receivedSoFar}
-          unit={itemUnit ?? ""}
+      <label className="flex flex-col gap-1.5">
+        <span className={labelClass}>Qty</span>
+        <input
+          name="quantity_received"
+          type="number"
+          step="0.01"
+          min="0.01"
+          placeholder={remainingQuantity > 0 ? `Qty (${Number(remainingQuantity.toFixed(2))} left)` : "Extra qty"}
+          value={quantity}
+          onChange={(e) => setQuantity(e.target.value)}
+          required
+          className={`${inputClass} ${overBy > 0 ? "border-red-400 bg-red-50" : ""}`}
         />
-      </div>
+      </label>
 
-      <div
-        className={`text-xs ${receivedSoFar > quantityOrdered ? "font-bold text-red-700" : "text-[#6b7280]"}`}
-      >
-        {receivedSoFar} / {quantityOrdered}
-      </div>
+      <label className="flex flex-col gap-1.5">
+        <span className={labelClass}>Date</span>
+        <input
+          name="received_date"
+          type="date"
+          defaultValue={today}
+          // Deliveries can't be logged ahead of time or before the order
+          // date — those days are greyed out in the picker. logReceiving
+          // re-checks the future limit and the DB enforces both.
+          min={orderDate}
+          max={today}
+          required
+          className={inputClass}
+        />
+      </label>
 
-      <input
-        name="quantity_received"
-        type="number"
-        step="0.01"
-        min="0.01"
-        placeholder={remainingQuantity > 0 ? `Qty (${remainingQuantity} left)` : "Extra qty"}
-        value={quantity}
-        onChange={(e) => setQuantity(e.target.value)}
-        required
-        className={`${inputClass} ${overBy > 0 ? "border-red-400 bg-red-50" : ""}`}
-      />
+      <label className="flex flex-col gap-1.5">
+        <span className={labelClass}>Invoice</span>
+        <input name="invoice_number" type="text" placeholder="Invoice #" required className={inputClass} />
+      </label>
 
-      <input
-        name="received_date"
-        type="date"
-        defaultValue={today}
-        // Deliveries can't be logged ahead of time or before the order
-        // date — those days are greyed out in the picker. logReceiving
-        // re-checks the future limit and the DB enforces both.
-        min={orderDate}
-        max={today}
-        required
-        className={inputClass}
-      />
-
-      <input
-        name="invoice_number"
-        type="text"
-        placeholder="Invoice #"
-        required
-        className={inputClass}
-      />
-
-      <input
-        name="condition_notes"
-        type="text"
-        placeholder="Notes"
-        className={inputClass}
-      />
+      <label className="flex flex-col gap-1.5">
+        <span className={labelClass}>Notes</span>
+        <input name="condition_notes" type="text" placeholder="Optional" className={inputClass} />
+      </label>
 
       <button
         type="submit"
         disabled={isPending}
         aria-busy={isPending || undefined}
-        className="inline-flex items-center gap-1.5 justify-self-end rounded-full border border-brand-navy px-3.5 py-2 text-xs font-bold text-brand-navy hover:bg-brand-navy hover:text-white disabled:cursor-not-allowed disabled:border-gray-200 disabled:text-gray-300 disabled:hover:bg-transparent"
+        className="inline-flex items-center justify-center gap-1.5 rounded-full bg-brand-navy px-5 py-2.5 text-sm font-bold text-brand-gold-text hover:bg-brand-navy-2 disabled:cursor-not-allowed disabled:opacity-60"
       >
         {isPending ? (
           <>
@@ -175,23 +123,15 @@ export function LogReceivingForm({
             Saving…
           </>
         ) : (
-          "Log"
+          "Log delivery"
         )}
       </button>
-
-      {/* The description gets its own full-width line under the row, lined
-          up with the item name, so a long spec stays readable. */}
-      {description && (
-        <p className="col-span-full -mt-1.5 break-words pl-[54px] text-xs text-[#7b8494]">
-          {description}
-        </p>
-      )}
 
       {overBy > 0 && (
         <p className="col-span-full rounded-lg border border-red-300 bg-red-50 px-3 py-2 text-xs font-bold text-red-700">
           ▲ This is {Number(overBy.toFixed(2))} {itemUnit} more than ordered
           {remainingQuantity > 0
-            ? ` (only ${remainingQuantity} ${itemUnit} left to receive)`
+            ? ` (only ${Number(remainingQuantity.toFixed(2))} ${itemUnit} left to receive)`
             : " — this line is already fully received"}
           . You can still log it; it will be flagged as over-received for the order and
           approval teams.

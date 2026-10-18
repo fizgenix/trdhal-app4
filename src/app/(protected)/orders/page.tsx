@@ -10,6 +10,7 @@ import { SubmitButton } from "@/components/ui/SubmitButton";
 import { NewOrderForm } from "./NewOrderForm";
 import { OrderSearchBox } from "./OrderSearchBox";
 import { AddLineForm } from "./AddLineForm";
+import { ActionRow, type RowAction } from "./ActionRow";
 import { editOrder, removeOrderLine, cancelPurchaseOrder } from "./actions";
 import type { OrderStatus } from "@/types/database";
 
@@ -86,6 +87,25 @@ const EDIT_ACTION_LABELS: Record<EditLogJoinRow["action"], string> = {
 function one<T>(rel: Rel<T>): T | null {
   if (!rel) return null;
   return Array.isArray(rel) ? (rel[0] ?? null) : rel;
+}
+
+/** "2,31,232" — Indian digit grouping, up to 2 decimals. */
+function formatQty(n: number) {
+  return Number(n).toLocaleString("en-IN", { maximumFractionDigits: 2 });
+}
+
+/** Columns of a PO row: PO, vendor, items, progress, placed, status. */
+const PO_GRID =
+  "grid gap-x-4 md:grid-cols-[minmax(0,1.4fr)_minmax(0,1.8fr)_44px_minmax(0,1.1fr)_minmax(0,0.9fr)_150px]";
+
+function ProgressBar({ percent, tone }: { percent: number; tone: "over" | "done" | "partial" }) {
+  const color =
+    tone === "over" ? "bg-red-500" : tone === "done" ? "bg-status-completed" : "bg-status-pending";
+  return (
+    <div className="h-1.5 w-full overflow-hidden rounded-full bg-[#efebe2]">
+      <div className={`h-full rounded-full ${color}`} style={{ width: `${Math.min(100, percent)}%` }} />
+    </div>
+  );
 }
 
 function formatDate(iso: string) {
@@ -303,305 +323,99 @@ export default async function OrdersPage({
         </p>
       )}
 
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="inline-flex flex-wrap gap-1 rounded-full border border-brand-border bg-white p-1">
-          {STATUS_TABS.map((tab) => {
-            const count =
-              tab.value === "all"
-                ? searchFiltered.length
-                : tab.value === "over"
-                  ? searchFiltered.filter((po) => overReceivedPos.has(po.id)).length
-                  : searchFiltered.filter((po) => statusByPo.get(po.id) === tab.value).length;
-            const isActive = (statusParam ?? "all") === tab.value;
-            const qSuffix = qParam ? `&q=${encodeURIComponent(qParam)}` : "";
-            return (
-              <Link
-                key={tab.value}
-                href={`/orders?site=${selectedSiteId}${tab.value === "all" ? "" : `&status=${tab.value}`}${qSuffix}`}
-                className={`rounded-full px-4 py-2 text-[13px] font-bold ${
-                  isActive
-                    ? "bg-brand-navy text-white"
-                    : "text-[#4b5563] hover:bg-brand-content"
-                }`}
-              >
-                {tab.label}{" "}
-                <span
-                  className={`font-semibold ${isActive ? "text-brand-gold-light" : "font-normal text-[#7b8494]"}`}
+      <section className="rounded-2xl border border-brand-border bg-white shadow-sm">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-brand-border-soft p-3">
+          <div className="flex flex-wrap gap-1">
+            {STATUS_TABS.map((tab) => {
+              const count =
+                tab.value === "all"
+                  ? searchFiltered.length
+                  : tab.value === "over"
+                    ? searchFiltered.filter((po) => overReceivedPos.has(po.id)).length
+                    : searchFiltered.filter((po) => statusByPo.get(po.id) === tab.value).length;
+              const isActive = (statusParam ?? "all") === tab.value;
+              const qSuffix = qParam ? `&q=${encodeURIComponent(qParam)}` : "";
+              return (
+                <Link
+                  key={tab.value}
+                  href={`/orders?site=${selectedSiteId}${tab.value === "all" ? "" : `&status=${tab.value}`}${qSuffix}`}
+                  className={`rounded-lg px-3 py-1.5 text-[13px] font-bold ${
+                    isActive ? "bg-brand-navy text-white" : "text-[#4b5563] hover:bg-brand-content"
+                  }`}
                 >
-                  {count}
-                </span>
-              </Link>
-            );
-          })}
+                  {tab.label}{" "}
+                  <span
+                    className={isActive ? "font-semibold text-brand-gold-light" : "font-normal text-[#7b8494]"}
+                  >
+                    {count}
+                  </span>
+                </Link>
+              );
+            })}
+          </div>
+
+          <OrderSearchBox
+            basePath="/orders"
+            siteId={selectedSiteId}
+            status={statusParam}
+            defaultValue={qParam ?? ""}
+          />
         </div>
 
-        <OrderSearchBox
-          basePath="/orders"
-          siteId={selectedSiteId}
-          status={statusParam}
-          defaultValue={qParam ?? ""}
-        />
-      </div>
+        {/* Column names — same toggle / cells / menu layout as ActionRow. */}
+        <div className="hidden items-center gap-2 border-b border-brand-border-soft bg-brand-cream px-4 py-2 text-[10.5px] font-bold uppercase tracking-wider text-[#8a836f] md:flex">
+          <span className="w-7 shrink-0" />
+          <div className={`${PO_GRID} flex-1`}>
+            <div>PO</div>
+            <div>Vendor</div>
+            <div>Items</div>
+            <div>Progress</div>
+            <div>Placed</div>
+            <div className="text-right">Status</div>
+          </div>
+          <span className="w-8 shrink-0" />
+        </div>
 
-      <div className="flex flex-col gap-4">
-        {visiblePos.map((po) => {
-          const shopkeeper = one(po.shopkeepers);
-          const placedByProfile = one(po.profiles);
-          const poLines = linesByPo.get(po.id) ?? [];
-          const poStatus = statusByPo.get(po.id) ?? "placed";
-          const isOwner = user.isAdmin || po.placed_by === user.id;
-          const activeLineCount = poLines.filter((l) => l.status !== "cancelled").length;
-          const poLogs = editLogsByPo.get(po.id) ?? [];
-          const invoiceNumbers = Array.from(invoiceNumbersByPo.get(po.id) ?? []);
+        <div className="divide-y divide-brand-border-soft">
+          {visiblePos.map((po) => {
+            const shopkeeper = one(po.shopkeepers);
+            const placedByProfile = one(po.profiles);
+            const poLines = linesByPo.get(po.id) ?? [];
+            const activeLines = poLines.filter((l) => l.status !== "cancelled");
+            const poStatus = statusByPo.get(po.id) ?? "placed";
+            const isOwner = user.isAdmin || po.placed_by === user.id;
+            const activeLineCount = activeLines.length;
+            const poLogs = editLogsByPo.get(po.id) ?? [];
+            const invoiceNumbers = Array.from(invoiceNumbersByPo.get(po.id) ?? []);
+            const isOverReceived = overReceivedPos.has(po.id);
 
-          return (
-            <div
-              key={po.id}
-              className="rounded-2xl border border-brand-border bg-white p-[18px] shadow-sm"
-            >
-              <div className="flex flex-wrap items-start justify-between gap-3">
-                <div>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="rounded-full border border-brand-border bg-brand-cream px-2.5 py-0.5 font-mono text-[13px] font-bold text-brand-navy">
-                      {po.po_number}
-                    </span>
-                    <p className="text-[15px] font-bold text-brand-navy">
-                      {shopkeeper?.name ?? "Unknown vendor"}
-                    </p>
-                  </div>
-                  <p className="mt-0.5 text-[11px] text-[#7b8494]">
-                    {activeLineCount} item{activeLineCount === 1 ? "" : "s"} · Placed by{" "}
-                    {placedByProfile?.full_name ?? "Unknown"} on {formatDate(po.placed_date)}
-                  </p>
-                  {invoiceNumbers.length > 0 && (
-                    <p className="mt-0.5 text-[11px] text-[#7b8494]">
-                      Invoice{invoiceNumbers.length > 1 ? "s" : ""}:{" "}
-                      {invoiceNumbers.join(", ")}
-                    </p>
-                  )}
-                </div>
-                <div className="flex flex-wrap items-center gap-2">
-                  {overReceivedPos.has(po.id) && (
-                    <span className="rounded-full border border-red-300 bg-red-100 px-3 py-1.5 text-xs font-bold text-red-700">
-                      ▲ Over-received
-                    </span>
-                  )}
-                  <StatusBadge status={poStatus} />
-                </div>
-              </div>
+            // Mean of each line's own progress (lines can be in different
+            // units, so their quantities can't simply be summed).
+            const progress =
+              activeLines.length === 0
+                ? 0
+                : (activeLines.reduce(
+                    (sum, l) =>
+                      sum + Math.min(1, (receivedTotalByLine.get(l.id) ?? 0) / l.quantity_ordered),
+                    0,
+                  ) /
+                    activeLines.length) *
+                  100;
 
-              <div className="mt-4 overflow-hidden rounded-xl border border-brand-border-soft">
-                <div className="hidden grid-cols-[minmax(0,1.6fr)_0.7fr_0.7fr_1fr_auto] gap-3 bg-brand-cream px-4 py-2 text-[10.5px] font-bold uppercase tracking-wider text-[#8a836f] sm:grid">
-                  <div>Item</div>
-                  <div>Ordered</div>
-                  <div>Received</div>
-                  <div>Progress</div>
-                  <div className="w-[230px] text-right">Status</div>
-                </div>
-                <div className="divide-y divide-brand-border-soft">
-                  {poLines.map((line) => {
-                    const item = one(line.items);
-                    const received = receivedTotalByLine.get(line.id) ?? 0;
-                    const lineApprovals = approvalsByLine.get(line.id) ?? [];
-                    const approved = lineApprovals.reduce(
-                      (sum, a) => sum + Number(a.quantity_approved),
-                      0,
-                    );
-                    const shortClosed = lineApprovals.some((a) => a.closes_short);
-                    const isRemoved = line.status === "cancelled";
-                    const canManageLine = line.status === "placed" && isOwner;
-
-                    return (
-                      <div key={line.id} className={`px-4 py-3 ${isRemoved ? "opacity-60" : ""}`}>
-                        <div className="grid items-center gap-x-3 gap-y-1 sm:grid-cols-[minmax(0,1.6fr)_0.7fr_0.7fr_1fr_auto]">
-                          <div className="min-w-0">
-                            <p
-                              className={`break-words text-sm font-bold text-brand-navy ${isRemoved ? "line-through" : ""}`}
-                            >
-                              {item?.name ?? "Unknown item"}{" "}
-                              <span className="text-xs font-normal text-[#7b8494]">
-                                ({line.unit})
-                              </span>
-                            </p>
-                            {line.description && (
-                              <p className="text-xs text-[#7b8494]">{line.description}</p>
-                            )}
-                          </div>
-                          <p className="text-xs text-[#6b7280]">
-                            <span className="sm:hidden">Ordered: </span>
-                            {line.quantity_ordered} {line.unit}
-                          </p>
-                          <p className="text-xs text-[#6b7280]">
-                            <span className="sm:hidden">Received: </span>
-                            {received} {line.unit}
-                          </p>
-                          <div className="h-1.5 overflow-hidden rounded-full bg-[#efebe2]">
-                            {!isRemoved && (
-                              <div
-                                className={`h-full ${
-                                  received > line.quantity_ordered
-                                    ? "bg-red-500"
-                                    : received >= line.quantity_ordered
-                                    ? "bg-status-completed"
-                                    : "bg-status-pending"
-                                }`}
-                                style={{
-                                  width: `${Math.min(100, (received / line.quantity_ordered) * 100)}%`,
-                                }}
-                              />
-                            )}
-                          </div>
-                          <div className="sm:w-[230px] sm:text-right">
-                            {isRemoved ? (
-                              <span className="text-xs font-bold text-[#7b8494]">Removed</span>
-                            ) : (
-                              <span className="inline-flex flex-wrap items-center justify-end gap-1.5">
-                                <OverReceivedBadge
-                                  ordered={line.quantity_ordered}
-                                  received={received}
-                                  unit={line.unit}
-                                />
-                                {shortClosed && (
-                                  <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-amber-300 bg-amber-100 px-2.5 py-0.5 text-[11px] font-bold text-amber-800">
-                                    <span aria-hidden>▼</span>
-                                    Short-closed −
-                                    {Number((line.quantity_ordered - received).toFixed(2))} {line.unit}
-                                  </span>
-                                )}
-                                <StatusBadge status={lineDisplayStatus(line.status, approved)} />
-                              </span>
-                            )}
-                          </div>
-                        </div>
-
-                        {lineApprovals.length > 0 && (
-                          <ul className="mt-1.5 space-y-0.5 text-[11px] text-green-800">
-                            {lineApprovals.map((approval) => (
-                              <li
-                                key={approval.id}
-                                className={approval.closes_short ? "text-amber-800" : ""}
-                              >
-                                {approval.closes_short ? "Closed short" : "Approved"}{" "}
-                                {approval.quantity_approved} {line.unit} by{" "}
-                                {one(approval.profiles)?.full_name ?? "Unknown"} on{" "}
-                                {formatDate(approval.approved_date)}
-                                {approval.remarks && ` — "${approval.remarks}"`}
-                              </li>
-                            ))}
-                          </ul>
-                        )}
-
-                        {canManageLine && (
-                          <div className="mt-2 flex flex-wrap gap-x-5 gap-y-2">
-                            <details>
-                              <summary className="cursor-pointer text-xs font-semibold text-brand-navy">
-                                Edit quantity
-                              </summary>
-                              <form action={editOrder} className="mt-3 flex flex-wrap items-end gap-3">
-                                <input type="hidden" name="order_id" value={line.id} />
-                                <div className="w-40">
-                                  <Field
-                                    label="New quantity"
-                                    id={`qty-${line.id}`}
-                                    name="quantity_ordered"
-                                    type="number"
-                                    step="0.01"
-                                    min="0.01"
-                                    defaultValue={line.quantity_ordered}
-                                    suffix={line.unit}
-                                    required
-                                  />
-                                </div>
-                                <div className="w-64">
-                                  <Field
-                                    label="Reason (optional)"
-                                    id={`edit-note-${line.id}`}
-                                    name="note"
-                                    placeholder="e.g. corrected typo"
-                                  />
-                                </div>
-                                <SubmitButton variant="secondary">Save</SubmitButton>
-                              </form>
-                            </details>
-
-                            {activeLineCount > 1 && (
-                              <details>
-                                <summary className="cursor-pointer text-xs font-semibold text-red-600">
-                                  Remove item
-                                </summary>
-                                <form
-                                  action={removeOrderLine}
-                                  className="mt-3 flex flex-wrap items-end gap-3"
-                                >
-                                  <input type="hidden" name="order_id" value={line.id} />
-                                  <div className="w-64">
-                                    <Field
-                                      label="Reason (optional)"
-                                      id={`remove-note-${line.id}`}
-                                      name="note"
-                                      placeholder="e.g. not needed any more"
-                                    />
-                                  </div>
-                                  <SubmitButton
-                                    variant="danger"
-                                    pendingText="Removing… please wait"
-                                  >
-                                    Remove this item
-                                  </SubmitButton>
-                                </form>
-                              </details>
-                            )}
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-
-              {isOwner && (poStatus === "placed" || poStatus === "pending_approval") && (
-                <div className="mt-4 flex flex-col gap-2 border-t border-brand-border-soft pt-4">
-                  {canOrderHere && (
-                    <details>
-                      <summary className="cursor-pointer text-sm font-semibold text-brand-navy">
-                        + Add an item to this PO
-                      </summary>
-                      <AddLineForm purchaseOrderId={po.id} items={itemsWithUsualUnit} />
-                    </details>
-                  )}
-
-                  {poStatus === "placed" && (
-                    <details>
-                      <summary className="cursor-pointer text-sm font-semibold text-red-600">
-                        Cancel PO
-                      </summary>
-                      <form
-                        action={cancelPurchaseOrder}
-                        className="mt-3 flex flex-wrap items-end gap-3"
-                      >
-                        <input type="hidden" name="purchase_order_id" value={po.id} />
-                        <div className="w-64">
-                          <Field
-                            label="Reason (optional)"
-                            id={`cancel-note-${po.id}`}
-                            name="note"
-                            placeholder="e.g. wrong vendor"
-                          />
-                        </div>
-                        <SubmitButton variant="danger" pendingText="Cancelling… please wait">
-                          Cancel this PO
-                        </SubmitButton>
-                      </form>
-                    </details>
-                  )}
-                </div>
-              )}
-
-              {poLogs.length > 0 && (
-                <details className="mt-3">
-                  <summary className="cursor-pointer text-xs text-[#7b8494]">
-                    History ({poLogs.length})
-                  </summary>
+            const poIsOpen = poStatus === "placed" || poStatus === "pending_approval";
+            const poActions: RowAction[] = [];
+            if (isOwner && poIsOpen && canOrderHere) {
+              poActions.push({
+                key: "add",
+                label: "+ Add item to PO",
+                panel: <AddLineForm purchaseOrderId={po.id} items={itemsWithUsualUnit} />,
+              });
+            }
+            if (poLogs.length > 0) {
+              poActions.push({
+                key: "history",
+                label: `History (${poLogs.length})`,
+                panel: (
                   <ul className="mt-2 space-y-1 text-xs text-[#6b7280]">
                     {poLogs.map((log) => {
                       const editor = one(log.profiles);
@@ -616,25 +430,265 @@ export default async function OrdersPage({
                       );
                     })}
                   </ul>
-                </details>
-              )}
-            </div>
-          );
-        })}
+                ),
+              });
+            }
+            if (isOwner && poStatus === "placed") {
+              poActions.push({
+                key: "cancel",
+                label: "Cancel PO",
+                tone: "danger",
+                panel: (
+                  <form action={cancelPurchaseOrder} className="mt-3 flex flex-wrap items-end gap-3">
+                    <input type="hidden" name="purchase_order_id" value={po.id} />
+                    <div className="w-64">
+                      <Field
+                        label="Reason (optional)"
+                        id={`cancel-note-${po.id}`}
+                        name="note"
+                        placeholder="e.g. wrong vendor"
+                      />
+                    </div>
+                    <SubmitButton variant="danger" pendingText="Cancelling… please wait">
+                      Cancel this PO
+                    </SubmitButton>
+                  </form>
+                ),
+              });
+            }
 
-        {purchaseOrders.length === 0 && (
-          <p className="rounded-2xl border border-dashed border-brand-border bg-white p-8 text-center text-[#7b8494]">
-            No orders placed at this site yet.
+            // A search that matched an item opens the PO to show it.
+            const matchesItem =
+              !!q && poLines.some((l) => one(l.items)?.name.toLowerCase().includes(q) ?? false);
+
+            return (
+              <ActionRow
+                key={po.id}
+                defaultExpanded={matchesItem}
+                version={`${poStatus}|${activeLineCount}|${poLogs.length}`}
+                actions={poActions}
+                className="data-[expanded=true]:bg-brand-cream/60"
+                rowClassName="px-4 py-3"
+                summary={
+                  <div className={`${PO_GRID} items-center gap-y-1.5`}>
+                    <p className="break-words font-mono text-[13px] font-bold text-brand-navy [overflow-wrap:anywhere]">
+                      {po.po_number}
+                    </p>
+                    <div className="min-w-0">
+                      <p className="text-sm font-bold text-brand-navy">
+                        {shopkeeper?.name ?? "Unknown vendor"}
+                      </p>
+                      {invoiceNumbers.length > 0 && (
+                        <p className="text-[11px] text-[#7b8494]">
+                          Invoice{invoiceNumbers.length > 1 ? "s" : ""}: {invoiceNumbers.join(", ")}
+                        </p>
+                      )}
+                    </div>
+                    <p className="text-sm text-[#4b5563]">
+                      <span className="md:hidden">Items: </span>
+                      {activeLineCount}
+                    </p>
+                    <div className="flex items-center gap-2.5">
+                      <ProgressBar
+                        percent={progress}
+                        tone={isOverReceived ? "over" : progress >= 100 ? "done" : "partial"}
+                      />
+                      <span className="w-9 shrink-0 text-right text-xs font-bold text-[#4b5563]">
+                        {Math.floor(progress)}%
+                      </span>
+                    </div>
+                    <div>
+                      <p className="text-[13px] text-brand-navy">{formatDate(po.placed_date)}</p>
+                      <p className="text-[11px] text-[#7b8494]">
+                        {placedByProfile?.full_name ?? "Unknown"}
+                      </p>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-1.5 md:flex-col md:items-end">
+                      {isOverReceived && (
+                        <span className="rounded-full border border-red-300 bg-red-100 px-2.5 py-0.5 text-[11px] font-bold text-red-700">
+                          ▲ Over-received
+                        </span>
+                      )}
+                      <StatusBadge status={poStatus} />
+                    </div>
+                  </div>
+                }
+              >
+                <div className="divide-y divide-brand-border-soft border-t border-brand-border-soft bg-brand-cream/60">
+                  {poLines.map((line) => {
+                    const item = one(line.items);
+                    const received = receivedTotalByLine.get(line.id) ?? 0;
+                    const lineApprovals = approvalsByLine.get(line.id) ?? [];
+                    const approved = lineApprovals.reduce(
+                      (sum, a) => sum + Number(a.quantity_approved),
+                      0,
+                    );
+                    const shortClosed = lineApprovals.some((a) => a.closes_short);
+                    const isRemoved = line.status === "cancelled";
+                    const canManageLine = line.status === "placed" && isOwner;
+
+                    const lineActions: RowAction[] = [];
+                    if (canManageLine) {
+                      lineActions.push({
+                        key: "edit",
+                        label: "Edit quantity",
+                        panel: (
+                          <form action={editOrder} className="mt-3 flex flex-wrap items-end gap-3">
+                            <input type="hidden" name="order_id" value={line.id} />
+                            <div className="w-52">
+                              <Field
+                                label="New quantity"
+                                id={`qty-${line.id}`}
+                                name="quantity_ordered"
+                                type="number"
+                                step="0.01"
+                                min="0.01"
+                                defaultValue={line.quantity_ordered}
+                                suffix={line.unit}
+                                required
+                              />
+                            </div>
+                            <div className="w-64">
+                              <Field
+                                label="Reason (optional)"
+                                id={`edit-note-${line.id}`}
+                                name="note"
+                                placeholder="e.g. corrected typo"
+                              />
+                            </div>
+                            <SubmitButton variant="secondary">Save</SubmitButton>
+                          </form>
+                        ),
+                      });
+                      if (activeLineCount > 1) {
+                        lineActions.push({
+                          key: "remove",
+                          label: "Remove item",
+                          tone: "danger",
+                          panel: (
+                            <form
+                              action={removeOrderLine}
+                              className="mt-3 flex flex-wrap items-end gap-3"
+                            >
+                              <input type="hidden" name="order_id" value={line.id} />
+                              <div className="w-64">
+                                <Field
+                                  label="Reason (optional)"
+                                  id={`remove-note-${line.id}`}
+                                  name="note"
+                                  placeholder="e.g. not needed any more"
+                                />
+                              </div>
+                              <SubmitButton variant="danger" pendingText="Removing… please wait">
+                                Remove this item
+                              </SubmitButton>
+                            </form>
+                          ),
+                        });
+                      }
+                    }
+
+                    return (
+                      <ActionRow
+                        key={line.id}
+                        version={`${line.quantity_ordered}|${line.status}`}
+                        actions={lineActions}
+                        className={isRemoved ? "opacity-60" : ""}
+                        rowClassName="py-3 pl-4 pr-4 md:pl-[52px]"
+                        summary={
+                          <div className="grid items-center gap-x-4 gap-y-1.5 md:grid-cols-[minmax(0,1fr)_170px_130px_minmax(130px,auto)]">
+                            <div className="min-w-0">
+                              <p
+                                className={`break-words text-sm font-bold text-brand-navy ${isRemoved ? "line-through" : ""}`}
+                              >
+                                {item?.name ?? "Unknown item"}{" "}
+                                <span className="font-normal text-[#7b8494]">({line.unit})</span>
+                              </p>
+                              {line.description && (
+                                <p className="text-xs text-[#7b8494]">{line.description}</p>
+                              )}
+                              {lineApprovals.map((approval) => (
+                                <p
+                                  key={approval.id}
+                                  className={`text-[11px] ${approval.closes_short ? "text-amber-800" : "text-green-700"}`}
+                                >
+                                  {approval.closes_short ? "Closed short" : "Approved"}{" "}
+                                  {formatQty(approval.quantity_approved)} {line.unit} by{" "}
+                                  {one(approval.profiles)?.full_name ?? "Unknown"} on{" "}
+                                  {formatDate(approval.approved_date)}
+                                  {approval.remarks && ` — "${approval.remarks}"`}
+                                </p>
+                              ))}
+                            </div>
+                            <p className="text-[13px] text-[#4b5563] md:text-right">
+                              {formatQty(received)} {line.unit} / {formatQty(line.quantity_ordered)}{" "}
+                              {line.unit}
+                            </p>
+                            {isRemoved ? (
+                              <span className="hidden md:block" />
+                            ) : (
+                              <ProgressBar
+                                percent={(received / line.quantity_ordered) * 100}
+                                tone={
+                                  received > line.quantity_ordered
+                                    ? "over"
+                                    : received >= line.quantity_ordered
+                                      ? "done"
+                                      : "partial"
+                                }
+                              />
+                            )}
+                            <div className="flex flex-wrap items-center gap-1.5 md:justify-end">
+                              {isRemoved ? (
+                                <span className="text-xs font-bold text-[#7b8494]">Removed</span>
+                              ) : (
+                                <>
+                                  <OverReceivedBadge
+                                    ordered={line.quantity_ordered}
+                                    received={received}
+                                    unit={line.unit}
+                                  />
+                                  {shortClosed && (
+                                    <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-amber-300 bg-amber-100 px-2.5 py-0.5 text-[11px] font-bold text-amber-800">
+                                      <span aria-hidden>▼</span>
+                                      Short-closed −
+                                      {Number((line.quantity_ordered - received).toFixed(2))}{" "}
+                                      {line.unit}
+                                    </span>
+                                  )}
+                                  <StatusBadge status={lineDisplayStatus(line.status, approved)} />
+                                </>
+                              )}
+                            </div>
+                          </div>
+                        }
+                      />
+                    );
+                  })}
+                </div>
+              </ActionRow>
+            );
+          })}
+
+          {purchaseOrders.length === 0 && (
+            <p className="p-8 text-center text-[#7b8494]">No orders placed at this site yet.</p>
+          )}
+          {purchaseOrders.length > 0 && visiblePos.length === 0 && (
+            <p className="p-8 text-center text-[#7b8494]">
+              {qParam
+                ? `No orders match "${qParam}"${statusParam && statusParam !== "all" ? " in this filter" : ""}.`
+                : "No orders match this filter."}
+            </p>
+          )}
+        </div>
+
+        {purchaseOrders.length > 0 && (
+          <p className="rounded-b-2xl border-t border-brand-border-soft px-4 py-2.5 text-xs text-[#7b8494]">
+            Showing {visiblePos.length} of {purchaseOrders.length} order
+            {purchaseOrders.length === 1 ? "" : "s"}
           </p>
         )}
-        {purchaseOrders.length > 0 && visiblePos.length === 0 && (
-          <p className="rounded-2xl border border-dashed border-brand-border bg-white p-8 text-center text-[#7b8494]">
-            {qParam
-              ? `No orders match "${qParam}"${statusParam && statusParam !== "all" ? " in this filter" : ""}.`
-              : "No orders match this filter."}
-          </p>
-        )}
-      </div>
+      </section>
     </div>
   );
 }

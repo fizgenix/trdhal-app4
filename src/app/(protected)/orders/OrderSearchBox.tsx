@@ -14,11 +14,16 @@ export function OrderSearchBox({
   siteId,
   status,
   defaultValue,
+  extraParams,
+  placeholder = "Search PO, item or vendor…",
 }: {
   basePath: string;
   siteId: string;
   status?: string;
   defaultValue: string;
+  /** Other query params to keep while searching (e.g. Receiving's `tab`). */
+  extraParams?: Record<string, string>;
+  placeholder?: string;
 }) {
   const router = useRouter();
   const [value, setValue] = useState(defaultValue);
@@ -47,6 +52,7 @@ export function OrderSearchBox({
       const params = new URLSearchParams();
       params.set("site", siteId);
       if (status && status !== "all") params.set("status", status);
+      for (const [key, val] of Object.entries(extraParams ?? {})) params.set(key, val);
       if (next.trim()) params.set("q", next.trim());
       router.push(`${basePath}?${params.toString()}`);
     }, 300);
@@ -66,8 +72,8 @@ export function OrderSearchBox({
         type="search"
         value={value}
         onChange={(e) => handleChange(e.target.value)}
-        placeholder="Search PO, item or vendor…"
-        aria-label="Search orders by PO number, item or vendor"
+        placeholder={placeholder}
+        aria-label={placeholder.replace(/…$/, "")}
         className="w-full rounded-[10px] border border-brand-input-border bg-white py-2.5 pl-9 pr-3.5 text-[15px] text-brand-navy placeholder:text-gray-400 focus:border-brand-gold focus:outline-none focus:ring-2 focus:ring-brand-gold/40"
       />
     </div>
