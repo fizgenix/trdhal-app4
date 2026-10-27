@@ -11,6 +11,7 @@ import { ActionRow } from "../orders/ActionRow";
 import { OrderSearchBox } from "../orders/OrderSearchBox";
 import { Field } from "@/components/ui/Field";
 import { SubmitButton } from "@/components/ui/SubmitButton";
+import { paginate, Pagination } from "@/components/ui/Pagination";
 import { indiaDay } from "@/lib/inventory";
 import type { OrderStatus } from "@/types/database";
 
@@ -151,10 +152,16 @@ function formatDate(iso: string) {
 export default async function ReceivingPage({
   searchParams,
 }: {
-  searchParams: Promise<{ site?: string; tab?: string; q?: string; new?: string }>;
+  searchParams: Promise<{ site?: string; tab?: string; q?: string; new?: string; page?: string }>;
 }) {
   const user = await requireUser();
-  const { site: siteParam, tab: tabParam, q: qParam, new: newParam } = await searchParams;
+  const {
+    site: siteParam,
+    tab: tabParam,
+    q: qParam,
+    new: newParam,
+    page: pageParam,
+  } = await searchParams;
   const tab = tabParam === "direct" ? "direct" : "open";
   const supabase = await createClient();
 
@@ -217,15 +224,28 @@ export default async function ReceivingPage({
       .eq("kind", "po")
       .in("orders.status", OPEN_STATUSES)
       .order("placed_date", { ascending: false }),
-    supabase
-      .from("purchase_orders")
-      .select(
-        "id, po_number, placed_date, shopkeepers ( name ), profiles ( full_name ), orders ( id, quantity_ordered, unit, status, items ( name ), order_edit_log ( action, note ), receiving_logs ( invoice_number, condition_notes ) )",
-      )
-      .eq("site_id", selectedSiteId)
-      .eq("kind", "direct")
-      .order("placed_date", { ascending: false })
-      .limit(50),
+    // Every direct receipt, so search and the page count cover all of
+    // them — fetched in batches since the API returns at most 1000 rows.
+    (async () => {
+      const BATCH = 1000;
+      const all: unknown[] = [];
+      for (let from = 0; ; from += BATCH) {
+        const { data, error } = await supabase
+          .from("purchase_orders")
+          .select(
+            "id, po_number, placed_date, shopkeepers ( name ), profiles ( full_name ), orders ( id, quantity_ordered, unit, status, items ( name ), order_edit_log ( action, note ), receiving_logs ( invoice_number, condition_notes ) )",
+          )
+          .eq("site_id", selectedSiteId)
+          .eq("kind", "direct")
+          .order("placed_date", { ascending: false })
+          .order("id")
+          .range(from, from + BATCH - 1);
+        if (error || !data) break;
+        all.push(...data);
+        if (data.length < BATCH) break;
+      }
+      return { data: all };
+    })(),
     canReceiveHere
       ? supabase.from("items").select("id, name, unit").order("name")
       : Promise.resolve({ data: [] }),
@@ -316,6 +336,11 @@ export default async function ReceivingPage({
         ].some((v) => v?.toLowerCase().includes(q)),
       )
     : directRows;
+
+  // 50 per page — POs on Open orders, item rows on Direct receipts.
+  const qSuffix = qParam ? `&q=${encodeURIComponent(qParam)}` : "";
+  const posPage = paginate(visiblePos, pageParam);
+  const directPage = paginate(visibleDirectRows, pageParam);
 
   const tabs = [
     { key: "open", label: "Open orders", count: purchaseOrders.length, href: base },
@@ -657,7 +682,7 @@ export default async function ReceivingPage({
           </div>
 
           <div className="divide-y divide-brand-border-soft">
-            {visiblePos.map(({ po, lines, itemMatch }, index) => {
+            {posPage.pageRows.map(({ po, lines, itemMatch }, index) => {
               const shopkeeper = one(po.shopkeepers);
               const placedByProfile = one(po.profiles);
               const orderDate = indiaDay(po.placed_date);
@@ -679,7 +704,7 @@ export default async function ReceivingPage({
               return (
                 <ActionRow
                   key={po.id}
-                  defaultExpanded={itemMatch || (!q && index === 0)}
+                  defaultExpanded={itemMatch || (!q && posPage.page === 1 && index === 0)}
                   className="data-[expanded=true]:bg-brand-cream/60"
                   rowClassName="px-4 py-3"
                   summary={
@@ -720,7 +745,7 @@ export default async function ReceivingPage({
                     </div>
                   }
                 >
-                  <div className="flex flex-col gap-2 border-t border-brand-border-soft px-4 py-3 md:pl-[52px] md:pr-14">
+                  <div className="flex flex-col gap-3 border-t border-brand-border-soft px-4 py-3 md:pl-[52px] md:pr-14">
                     {lines.map((order) => renderItem(order, orderDate))}
                     {itemMatch && lines.length < allLines.length && (
                       <p className="text-xs text-[#7b8494]">
@@ -739,6 +764,12 @@ export default async function ReceivingPage({
               <p className="p-8 text-center text-[#7b8494]">No open orders match “{qParam}”.</p>
             )}
           </div>
+          <Pagination
+            href={`${base}${qSuffix}`}
+            page={posPage.page}
+            total={posPage.total}
+            className="rounded-b-2xl border-t border-brand-border-soft"
+          />
         </section>
       ) : (
         <div className="flex flex-col gap-4">
@@ -766,7 +797,7 @@ export default async function ReceivingPage({
             </div>
 
             <div className="divide-y divide-brand-border-soft">
-              {visibleDirectRows.map(({ receipt, line, log }) => {
+              {directPage.pageRows.map(({ receipt, line, log }) => {
                 const status = DIRECT_STATUS[line.status];
                 const rejection = line.order_edit_log.find((l) => l.action === "rejected");
                 return (
@@ -829,6 +860,13 @@ export default async function ReceivingPage({
                 <p className="p-8 text-center text-[#7b8494]">No direct receipts match “{qParam}”.</p>
               )}
             </div>
+
+            <Pagination
+              href={`${directHref}${qSuffix}`}
+              page={directPage.page}
+              total={directPage.total}
+              className="rounded-b-2xl border-t border-brand-border-soft"
+            />
           </section>
         </div>
       )}

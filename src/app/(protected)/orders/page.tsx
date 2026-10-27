@@ -7,6 +7,7 @@ import { lineDisplayStatus, StatusBadge } from "@/components/StatusBadge";
 import { OverReceivedBadge } from "@/components/OverReceivedBadge";
 import { Field } from "@/components/ui/Field";
 import { SubmitButton } from "@/components/ui/SubmitButton";
+import { paginate, Pagination } from "@/components/ui/Pagination";
 import { NewOrderForm } from "./NewOrderForm";
 import { OrderSearchBox } from "./OrderSearchBox";
 import { AddLineForm } from "./AddLineForm";
@@ -132,10 +133,10 @@ function purchaseOrderStatus(lines: OrderLineRow[]): OrderStatus {
 export default async function OrdersPage({
   searchParams,
 }: {
-  searchParams: Promise<{ site?: string; status?: string; q?: string }>;
+  searchParams: Promise<{ site?: string; status?: string; q?: string; page?: string }>;
 }) {
   const user = await requireUser();
-  const { site: siteParam, status: statusParam, q: qParam } = await searchParams;
+  const { site: siteParam, status: statusParam, q: qParam, page: pageParam } = await searchParams;
   const supabase = await createClient();
 
   const sites = user.sites;
@@ -297,6 +298,8 @@ export default async function OrdersPage({
       statusParam === "all" ||
       (statusParam === "over" ? overReceivedPos.has(po.id) : statusByPo.get(po.id) === statusParam),
   );
+  // 50 POs per page, after search and the status tab.
+  const posPage = paginate(visiblePos, pageParam);
 
   return (
     <div className="flex flex-col gap-8">
@@ -377,7 +380,7 @@ export default async function OrdersPage({
         </div>
 
         <div className="divide-y divide-brand-border-soft">
-          {visiblePos.map((po) => {
+          {posPage.pageRows.map((po) => {
             const shopkeeper = one(po.shopkeepers);
             const placedByProfile = one(po.profiles);
             const poLines = linesByPo.get(po.id) ?? [];
@@ -682,7 +685,14 @@ export default async function OrdersPage({
           )}
         </div>
 
-        {purchaseOrders.length > 0 && (
+        {posPage.pageCount > 1 ? (
+          <Pagination
+            href={`/orders?site=${selectedSiteId}${statusParam && statusParam !== "all" ? `&status=${statusParam}` : ""}${qParam ? `&q=${encodeURIComponent(qParam)}` : ""}`}
+            page={posPage.page}
+            total={posPage.total}
+            className="rounded-b-2xl border-t border-brand-border-soft"
+          />
+        ) : purchaseOrders.length > 0 && (
           <p className="rounded-b-2xl border-t border-brand-border-soft px-4 py-2.5 text-xs text-[#7b8494]">
             Showing {visiblePos.length} of {purchaseOrders.length} order
             {purchaseOrders.length === 1 ? "" : "s"}

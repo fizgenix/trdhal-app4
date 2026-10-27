@@ -4,6 +4,7 @@ import { SiteSwitcher } from "@/components/SiteSwitcher";
 import { resolveSelectedSiteId } from "@/lib/selected-site";
 import { loadInventory, poMatches, type Movement } from "@/lib/inventory";
 import { InventoryFilters } from "./InventoryFilters";
+import { paginate, Pagination } from "@/components/ui/Pagination";
 
 // Phones: item + stock only; the other columns appear from `sm` up.
 const ROW_GRID =
@@ -69,7 +70,14 @@ function Reference({ m, unit, highlight }: { m: Movement; unit: string; highligh
 export default async function InventoryPage({
   searchParams,
 }: {
-  searchParams: Promise<{ site?: string; q?: string; from?: string; to?: string; zero?: string }>;
+  searchParams: Promise<{
+    site?: string;
+    q?: string;
+    from?: string;
+    to?: string;
+    zero?: string;
+    page?: string;
+  }>;
 }) {
   const user = await requireUser();
   const params = await searchParams;
@@ -100,6 +108,14 @@ export default async function InventoryPage({
     to: filters.to || undefined,
     showOutOfStock: filters.zero,
   });
+
+  // 50 item lines per page; the filters stay in the page links.
+  const linesPage = paginate(lines, params.page);
+  const listParams = new URLSearchParams({ site: selectedSiteId });
+  if (filters.q.trim()) listParams.set("q", filters.q.trim());
+  if (filters.from) listParams.set("from", filters.from);
+  if (filters.to) listParams.set("to", filters.to);
+  if (filters.zero) listParams.set("zero", "1");
 
   const hasRange = !!(filters.from || filters.to);
   const periodLabel = hasRange
@@ -167,7 +183,7 @@ export default async function InventoryPage({
           </div>
 
           <div className="divide-y divide-brand-border-soft">
-            {lines.map((line) => (
+            {linesPage.pageRows.map((line) => (
               <details key={line.key} className="group">
                 <summary
                   className={`${ROW_GRID} cursor-pointer list-none px-5 py-3.5 hover:bg-[#fbfaf6] [&::-webkit-details-marker]:hidden`}
@@ -288,6 +304,12 @@ export default async function InventoryPage({
               </details>
             ))}
           </div>
+          <Pagination
+            href={`/inventory?${listParams.toString()}`}
+            page={linesPage.page}
+            total={linesPage.total}
+            className="border-t border-brand-border"
+          />
         </div>
       )}
     </div>

@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { requireUser } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { SiteSwitcher } from "@/components/SiteSwitcher";
@@ -5,6 +6,7 @@ import { resolveSelectedSiteId } from "@/lib/selected-site";
 import { CardHeaderBand } from "@/components/ui/CardHeaderBand";
 import { ReleaseInventoryForm } from "./ReleaseInventoryForm";
 import { ApprovedStockList } from "./ApprovedStockList";
+import { PAGE_SIZE, pageFromParam, Pagination } from "@/components/ui/Pagination";
 
 type Rel<T> = T | T[] | null;
 
@@ -41,10 +43,11 @@ function formatDate(iso: string) {
 export default async function ReleasePage({
   searchParams,
 }: {
-  searchParams: Promise<{ site?: string }>;
+  searchParams: Promise<{ site?: string; page?: string }>;
 }) {
   const user = await requireUser();
-  const { site: siteParam } = await searchParams;
+  const { site: siteParam, page: pageParam } = await searchParams;
+  const page = pageFromParam(pageParam);
   const supabase = await createClient();
 
   const sites = user.sites;
@@ -66,7 +69,12 @@ export default async function ReleasePage({
       (a) => a.site_id === selectedSiteId && a.role === "ho2_receiving",
     );
 
-  const [{ data: inventoryData }, { data: items }, { data: buildingsData }, { data: releasesData }] =
+  const [
+    { data: inventoryData },
+    { data: items },
+    { data: buildingsData },
+    { data: releasesData, count: releasesCount },
+  ] =
     await Promise.all([
       supabase
         .from("site_inventory")
@@ -78,10 +86,12 @@ export default async function ReleasePage({
         .from("inventory_releases")
         .select(
           "id, quantity_released, unit, quality_notes, released_date, items ( name ), buildings ( name ), profiles ( full_name )",
+          { count: "exact" },
         )
         .eq("site_id", selectedSiteId)
         .order("released_date", { ascending: false })
-        .limit(50),
+        .order("id")
+        .range((page - 1) * PAGE_SIZE, page * PAGE_SIZE - 1),
     ]);
 
   const itemsById = new Map<string, ItemRow>();
@@ -149,7 +159,11 @@ export default async function ReleasePage({
 
       <div className="flex flex-col gap-3">
         <h2 className="text-lg font-bold text-brand-navy">Recent releases</h2>
-        {releases.length === 0 ? (
+        {releases.length === 0 && (releasesCount ?? 0) > 0 ? (
+          <p className="rounded-2xl border border-dashed border-brand-border bg-white p-8 text-center text-[#7b8494]">
+            No releases on this page — <Link href={`/release?site=${selectedSiteId}`} className="font-bold underline">back to the first page</Link>.
+          </p>
+        ) : releases.length === 0 ? (
           <p className="rounded-2xl border border-dashed border-brand-border bg-white p-8 text-center text-[#7b8494]">
             No inventory has been released at this site yet.
           </p>
@@ -176,6 +190,12 @@ export default async function ReleasePage({
             );
           })
         )}
+        <Pagination
+          href={`/release?site=${selectedSiteId}`}
+          page={page}
+          total={releasesCount ?? 0}
+          className="rounded-2xl border border-brand-border bg-white shadow-sm"
+        />
       </div>
     </div>
   );

@@ -74,10 +74,19 @@ export function ReceivingItemCard({
       ? "bg-status-completed"
       : "bg-status-pending";
 
+  // Left accent strip — keeps neighbouring items in a long PO visibly apart.
+  const accentColor = isOver
+    ? "border-l-red-500"
+    : dimmed
+      ? "border-l-status-completed"
+      : percent > 0
+        ? "border-l-status-pending"
+        : "border-l-brand-border";
+
   return (
     <div
-      className={`overflow-hidden rounded-xl border bg-white ${
-        expanded ? "border-brand-navy" : "border-brand-border-soft"
+      className={`overflow-hidden rounded-xl border border-l-4 bg-white shadow-[0_1px_3px_rgba(15,26,51,0.08)] ${accentColor} ${
+        expanded ? "border-brand-navy shadow-[0_4px_12px_-4px_rgba(15,26,51,0.25)]" : "border-brand-border"
       }`}
     >
       {/* Phones: ring | name | ▼ with the numbers stacked under the name.
