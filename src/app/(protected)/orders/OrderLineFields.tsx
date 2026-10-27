@@ -78,7 +78,7 @@ export function OrderLineFields({
     <div
       className={`grid items-start gap-3 ${
         inline && withDescription
-          ? "sm:grid-cols-[minmax(0,2fr)_minmax(0,0.8fr)_minmax(0,1fr)_minmax(0,2fr)_auto]"
+          ? "sm:grid-cols-[minmax(0,2fr)_minmax(0,1.1fr)_minmax(0,1fr)_minmax(0,1.7fr)_auto]"
           : "sm:grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1fr)_auto]"
       }`}
     >

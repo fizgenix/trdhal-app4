@@ -18,15 +18,17 @@ export function Field({ label, id, name, suffix, labelClassName = "", className 
       >
         {label}
       </label>
-      <div className="relative">
+      {/* The suffix sits beside the input (not over it) so it only takes
+          the width it needs and never hides what's typed. */}
+      <div className="flex items-center rounded-[10px] border border-brand-input-border focus-within:border-brand-gold focus-within:ring-2 focus-within:ring-brand-gold/40">
         <input
           id={fieldId}
           name={name}
-          className={`w-full rounded-[10px] border border-brand-input-border px-3.5 py-2.5 text-[15px] text-brand-navy placeholder:text-gray-400 focus:border-brand-gold focus:outline-none focus:ring-2 focus:ring-brand-gold/40 ${suffix ? "pr-24" : ""} ${className}`}
+          className={`w-full min-w-0 flex-1 rounded-[10px] bg-transparent px-3.5 py-2.5 text-[15px] text-brand-navy placeholder:text-gray-400 focus:outline-none ${suffix ? "pr-1" : ""} ${className}`}
           {...props}
         />
         {suffix && (
-          <span className="pointer-events-none absolute inset-y-0 right-3.5 flex items-center text-sm font-bold text-[#6b6553]">
+          <span className="pointer-events-none max-w-[40%] shrink-0 truncate pr-3.5 text-sm font-bold text-[#6b6553]">
             {suffix}
           </span>
         )}

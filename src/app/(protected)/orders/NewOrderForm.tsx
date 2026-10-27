@@ -134,7 +134,7 @@ export function NewOrderForm({
         <div className="rounded-xl border border-brand-border-soft">
           {/* Column names for the item rows — on phones each field keeps
               its own label instead. */}
-          <div className="grid grid-cols-1 gap-3 rounded-t-xl border-b border-brand-border-soft bg-brand-cream px-3 py-2 text-[10.5px] font-bold uppercase tracking-wider text-[#6b6553] sm:grid-cols-[minmax(0,2fr)_minmax(0,0.8fr)_minmax(0,1fr)_minmax(0,2fr)_78px]">
+          <div className="grid grid-cols-1 gap-3 rounded-t-xl border-b border-brand-border-soft bg-brand-cream px-3 py-2 text-[10.5px] font-bold uppercase tracking-wider text-[#6b6553] sm:grid-cols-[minmax(0,2fr)_minmax(0,1.1fr)_minmax(0,1fr)_minmax(0,1.7fr)_78px]">
             <div>Items on this PO ({lineKeys.length})</div>
             <div className="hidden sm:block">Quantity</div>
             <div className="hidden sm:block">Unit</div>
