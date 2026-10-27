@@ -41,6 +41,7 @@ export function SearchableSelect({
   onSelect,
   allowNew = true,
   labelClassName = "",
+  inputClassName = "",
 }: {
   label: string;
   name: string;
@@ -69,6 +70,8 @@ export function SearchableSelect({
   allowNew?: boolean;
   /** Extra classes for the label — e.g. "sm:sr-only" under a table header row. */
   labelClassName?: string;
+  /** Extra classes for the text box — e.g. a highlight once something is picked. */
+  inputClassName?: string;
 }) {
   const fieldId = useId();
   const listId = `${fieldId}-list`;
@@ -204,7 +207,7 @@ export function SearchableSelect({
           setHighlight(null);
         }}
         onKeyDown={handleKeyDown}
-        className="rounded-[10px] border border-brand-input-border px-3.5 py-2.5 text-[15px] text-brand-navy placeholder:text-gray-400 focus:border-brand-gold focus:outline-none focus:ring-2 focus:ring-brand-gold/40"
+        className={`rounded-[10px] border border-brand-input-border px-3.5 py-2.5 text-[15px] text-brand-navy placeholder:text-gray-400 focus:border-brand-gold focus:outline-none focus:ring-2 focus:ring-brand-gold/40 ${inputClassName}`}
       />
       <input type="hidden" name={name} value={selectedId} />
       {newNameField && (

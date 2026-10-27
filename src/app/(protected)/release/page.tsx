@@ -3,9 +3,8 @@ import { requireUser } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { SiteSwitcher } from "@/components/SiteSwitcher";
 import { resolveSelectedSiteId } from "@/lib/selected-site";
-import { CardHeaderBand } from "@/components/ui/CardHeaderBand";
-import { ReleaseInventoryForm } from "./ReleaseInventoryForm";
-import { ApprovedStockList } from "./ApprovedStockList";
+import { ReleasePanel } from "./ReleasePanel";
+import type { StockItem } from "./ApprovedStockList";
 import { PAGE_SIZE, pageFromParam, Pagination } from "@/components/ui/Pagination";
 
 type Rel<T> = T | T[] | null;
@@ -13,8 +12,6 @@ type Rel<T> = T | T[] | null;
 type SiteInventoryRow = { item_id: string; unit: string; quantity_available: number };
 type ItemRow = { id: string; name: string };
 type BuildingRow = { id: string; name: string };
-/** One stock line — an item in one unit (the same item in another unit is a separate line). */
-type StockItem = { key: string; itemId: string; name: string; unit: string; available: number };
 
 type ReleaseLogRow = {
   id: string;
@@ -30,6 +27,14 @@ type ReleaseLogRow = {
 function one<T>(rel: Rel<T>): T | null {
   if (!rel) return null;
   return Array.isArray(rel) ? (rel[0] ?? null) : rel;
+}
+
+/** Columns of a release row: date, item, qty, building, by, note. */
+const RELEASE_GRID =
+  "grid grid-cols-[110px_minmax(0,1.6fr)_110px_170px_120px_minmax(0,1fr)] items-center gap-3";
+
+function formatQty(n: number) {
+  return n.toLocaleString("en-IN", { maximumFractionDigits: 2 });
 }
 
 function formatDate(iso: string) {
@@ -116,7 +121,7 @@ export default async function ReleasePage({
   const releases = (releasesData ?? []) as unknown as ReleaseLogRow[];
 
   return (
-    <div className="flex flex-col gap-8">
+    <div className="flex flex-col gap-4">
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-extrabold text-brand-navy">Inventory Release</h1>
@@ -129,73 +134,85 @@ export default async function ReleasePage({
         )}
       </div>
 
-      <div className="grid gap-5 lg:grid-cols-[1fr_1.2fr]">
-        <div className="rounded-2xl border border-brand-border bg-white p-5 shadow-sm">
-          <CardHeaderBand inset={5}>Approved stock</CardHeaderBand>
-          {stockItems.length === 0 ? (
-            <p className="mt-3 text-sm text-[#7b8494]">
-              No approved stock to release yet — items become available once HO3 approves a delivery.
-            </p>
-          ) : (
-            <ApprovedStockList items={stockItems} />
-          )}
+      <ReleasePanel
+        siteId={selectedSiteId}
+        stockItems={stockItems}
+        buildings={buildings}
+        canRelease={canReleaseHere}
+      />
+
+      <div className="mt-2 flex flex-col gap-3">
+        <div className="flex items-center gap-2">
+          <h2 className="text-base font-extrabold text-brand-navy">Recent releases</h2>
+          <span className="rounded-full border border-brand-border bg-white px-[7px] text-[11px] font-bold text-[#374151]">
+            {releasesCount ?? 0}
+          </span>
         </div>
-
-        {canReleaseHere ? (
-          stockItems.length > 0 && (
-            <ReleaseInventoryForm
-              siteId={selectedSiteId}
-              stockItems={stockItems}
-              buildings={buildings}
-            />
-          )
-        ) : (
-          <p className="rounded-2xl border border-dashed border-brand-border bg-white p-6 text-center text-sm text-[#7b8494]">
-            You have view-only access at this site. Only Receiving (HO2) users can release
-            inventory.
-          </p>
-        )}
-      </div>
-
-      <div className="flex flex-col gap-3">
-        <h2 className="text-lg font-bold text-brand-navy">Recent releases</h2>
         {releases.length === 0 && (releasesCount ?? 0) > 0 ? (
-          <p className="rounded-2xl border border-dashed border-brand-border bg-white p-8 text-center text-[#7b8494]">
+          <p className="rounded-xl border border-dashed border-brand-border bg-white p-8 text-center text-[#7b8494]">
             No releases on this page — <Link href={`/release?site=${selectedSiteId}`} className="font-bold underline">back to the first page</Link>.
           </p>
         ) : releases.length === 0 ? (
-          <p className="rounded-2xl border border-dashed border-brand-border bg-white p-8 text-center text-[#7b8494]">
+          <p className="rounded-xl border border-dashed border-brand-border bg-white p-8 text-center text-[#7b8494]">
             No inventory has been released at this site yet.
           </p>
         ) : (
-          releases.map((release) => {
-            const item = one(release.items);
-            const building = one(release.buildings);
-            const releaser = one(release.profiles);
-            return (
-              <div
-                key={release.id}
-                className="rounded-2xl border border-brand-border bg-white p-5 shadow-sm"
-              >
-                <p className="font-semibold text-brand-navy">
-                  {release.quantity_released} {release.unit} of {item?.name ?? "Unknown item"}{" "}
-                  → {building?.name ?? "Unknown building"}
-                </p>
-                <p className="text-xs text-[#7b8494]">
-                  Released by {releaser?.full_name ?? "Unknown"} on{" "}
-                  {formatDate(release.released_date)}
-                  {release.quality_notes && ` — "${release.quality_notes}"`}
-                </p>
+          <div className="rounded-xl border border-brand-border bg-white">
+            <div className="overflow-x-auto">
+              <div className="min-w-[900px]">
+                <div
+                  className={`${RELEASE_GRID} rounded-t-xl border-b border-brand-border bg-brand-cream px-3.5 py-[9px] text-[10.5px] font-bold uppercase tracking-[0.09em] text-[#8a836f]`}
+                >
+                  <span>Date</span>
+                  <span>Item</span>
+                  <span className="text-right">Qty</span>
+                  <span>To building</span>
+                  <span>By</span>
+                  <span>Note</span>
+                </div>
+                {releases.map((release) => {
+                  const item = one(release.items)?.name ?? "Unknown item";
+                  const building = one(release.buildings)?.name ?? "Unknown building";
+                  return (
+                    <div
+                      key={release.id}
+                      className={`${RELEASE_GRID} border-b border-brand-border-soft px-3.5 py-2.5 text-[13px] last:border-0 hover:bg-brand-cream`}
+                    >
+                      <span className="text-[#374151]">{formatDate(release.released_date)}</span>
+                      <span title={item} className="truncate font-semibold text-brand-navy">
+                        {item}
+                      </span>
+                      <span className="text-right font-extrabold text-[#b45309]">
+                        −{formatQty(Number(release.quantity_released))} {release.unit}
+                      </span>
+                      <span
+                        title={building}
+                        className="max-w-full justify-self-start truncate rounded-full border border-brand-border bg-brand-cream px-2.5 py-0.5 text-xs font-bold text-brand-navy"
+                      >
+                        {building}
+                      </span>
+                      <span className="text-[#374151]">
+                        {one(release.profiles)?.full_name ?? "Unknown"}
+                      </span>
+                      <span
+                        title={release.quality_notes ?? undefined}
+                        className="truncate italic text-[#6b6553]"
+                      >
+                        {release.quality_notes ?? "—"}
+                      </span>
+                    </div>
+                  );
+                })}
               </div>
-            );
-          })
+            </div>
+            <Pagination
+              href={`/release?site=${selectedSiteId}`}
+              page={page}
+              total={releasesCount ?? 0}
+              className="rounded-b-xl border-t border-brand-border-soft"
+            />
+          </div>
         )}
-        <Pagination
-          href={`/release?site=${selectedSiteId}`}
-          page={page}
-          total={releasesCount ?? 0}
-          className="rounded-2xl border border-brand-border bg-white shadow-sm"
-        />
       </div>
     </div>
   );

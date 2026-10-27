@@ -517,7 +517,7 @@ export default async function OrdersPage({
                   </div>
                 }
               >
-                <div className="divide-y divide-brand-border-soft border-t border-brand-border-soft bg-brand-cream/60">
+                <div className="flex flex-col gap-3 border-t border-brand-border-soft bg-brand-cream/60 px-4 py-3 md:pl-[52px] md:pr-14">
                   {poLines.map((line) => {
                     const item = one(line.items);
                     const received = receivedTotalByLine.get(line.id) ?? 0;
@@ -528,6 +528,17 @@ export default async function OrdersPage({
                     );
                     const shortClosed = lineApprovals.some((a) => a.closes_short);
                     const isRemoved = line.status === "cancelled";
+                    // Left accent strip, as on Receiving's item cards — keeps
+                    // neighbouring items in a long PO visibly apart.
+                    const accentColor = isRemoved
+                      ? "border-l-brand-border"
+                      : received > line.quantity_ordered
+                        ? "border-l-red-500"
+                        : received >= line.quantity_ordered
+                          ? "border-l-status-completed"
+                          : received > 0
+                            ? "border-l-status-pending"
+                            : "border-l-brand-border";
                     const canManageLine = line.status === "placed" && isOwner;
 
                     const lineActions: RowAction[] = [];
@@ -596,8 +607,8 @@ export default async function OrdersPage({
                         key={line.id}
                         version={`${line.quantity_ordered}|${line.status}`}
                         actions={lineActions}
-                        className={isRemoved ? "opacity-60" : ""}
-                        rowClassName="py-3 pl-4 pr-4 md:pl-[52px]"
+                        className={`rounded-xl border border-l-4 border-brand-border bg-white shadow-[0_1px_3px_rgba(15,26,51,0.08)] ${accentColor} ${isRemoved ? "opacity-60" : ""}`}
+                        rowClassName="px-3 py-2.5"
                         summary={
                           <div className="grid items-center gap-x-4 gap-y-1.5 md:grid-cols-[minmax(0,1fr)_170px_130px_minmax(130px,auto)]">
                             <div className="min-w-0">

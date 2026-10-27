@@ -4,11 +4,9 @@ import { useActionState, useMemo, useState } from "react";
 import { releaseInventory, type ReleaseFormState } from "./actions";
 import { Field } from "@/components/ui/Field";
 import { Button } from "@/components/ui/Button";
-import { CardHeaderBand } from "@/components/ui/CardHeaderBand";
 import { SearchableSelect } from "@/components/ui/SearchableSelect";
+import type { StockItem } from "./ApprovedStockList";
 
-/** One stock line — an item in one unit. */
-type StockItem = { key: string; itemId: string; name: string; unit: string; available: number };
 type Building = { id: string; name: string };
 
 const initialState: ReleaseFormState = { error: null, success: null };
@@ -17,13 +15,20 @@ export function ReleaseInventoryForm({
   siteId,
   stockItems,
   buildings,
+  selectedKey,
+  onSelectKey,
+  pickVersion,
 }: {
   siteId: string;
   stockItems: StockItem[];
   buildings: Building[];
+  /** The picked stock line — shared with the Approved stock list (ReleasePanel). */
+  selectedKey: string;
+  onSelectKey: (key: string) => void;
+  /** Changes when the list picks an item, re-mounting the item box to show it. */
+  pickVersion: number;
 }) {
   const [state, formAction, isPending] = useActionState(releaseInventory, initialState);
-  const [selectedKey, setSelectedKey] = useState("");
   const [formKey, setFormKey] = useState(0);
 
   // Same render-time reset pattern used by the other forms in this app.
@@ -32,7 +37,7 @@ export function ReleaseInventoryForm({
     setPrevState(state);
     if (state.success) {
       setFormKey((k) => k + 1);
-      setSelectedKey("");
+      onSelectKey("");
     }
   }
 
@@ -45,16 +50,22 @@ export function ReleaseInventoryForm({
     <form
       key={formKey}
       action={formAction}
-      className="grid gap-4 rounded-2xl border border-brand-border bg-white p-6 shadow-sm sm:grid-cols-2"
+      className="grid gap-3.5 p-4 sm:grid-cols-2"
     >
       <input type="hidden" name="site_id" value={siteId} />
 
       <div className="sm:col-span-2">
-        <CardHeaderBand>Release stock</CardHeaderBand>
-      </div>
-
-      <div className="sm:col-span-2">
         <SearchableSelect
+          key={pickVersion}
+          initial={
+            selectedItem
+              ? {
+                  id: selectedItem.key,
+                  label: `${selectedItem.name} — ${selectedItem.available} ${selectedItem.unit} available`,
+                }
+              : undefined
+          }
+          inputClassName={selectedItem ? "border-brand-gold-border bg-[#fffbf0]" : ""}
           label="Item"
           name="stock_line"
           noun="item"
@@ -66,7 +77,7 @@ export function ReleaseInventoryForm({
             name: i.name,
             label: `${i.name} — ${i.available} ${i.unit} available`,
           }))}
-          onSelect={(id) => setSelectedKey(id)}
+          onSelect={(id) => onSelectKey(id)}
         />
         {/* Stock is per item *and* unit, so both go to the server. */}
         <input type="hidden" name="item_id" value={selectedItem?.itemId ?? ""} />
@@ -74,17 +85,17 @@ export function ReleaseInventoryForm({
       </div>
 
       <Field
-        label={
-          selectedItem
-            ? `Quantity to release (up to ${selectedItem.available} ${selectedItem.unit})`
-            : "Quantity to release"
-        }
+        label="Quantity to release"
         name="quantity_released"
         type="number"
         step="0.01"
         min="0.01"
         max={selectedItem ? selectedItem.available : undefined}
-        placeholder="e.g. 50"
+        placeholder={
+          selectedItem
+            ? `Max ${selectedItem.available.toLocaleString("en-IN")} ${selectedItem.unit}`
+            : "e.g. 50"
+        }
         required
         suffix={selectedItem?.unit}
       />

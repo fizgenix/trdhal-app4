@@ -30,6 +30,7 @@ type ApprovalRow = {
     item_id: string;
     unit: string;
     quantity_ordered: number;
+    description: string | null;
     items: Rel<{ name: string }>;
     purchase_orders: Rel<{ po_number: string; shopkeepers: Rel<{ name: string }> }>;
   }>;
@@ -84,6 +85,8 @@ export type StockLine = {
   key: string;
   itemName: string;
   unit: string;
+  /** The description on the latest approved PO line for this item that has one. */
+  description: string | null;
   /** Approved in / released within the date range (all time if none). */
   approvedIn: number;
   released: number;
@@ -127,7 +130,7 @@ export async function loadInventory(
       supabase
         .from("approvals")
         .select(
-          "id, order_id, quantity_approved, closes_short, remarks, approved_date, profiles ( full_name ), orders!inner ( site_id, item_id, unit, quantity_ordered, items ( name ), purchase_orders ( po_number, shopkeepers ( name ) ) )",
+          "id, order_id, quantity_approved, closes_short, remarks, approved_date, profiles ( full_name ), orders!inner ( site_id, item_id, unit, quantity_ordered, description, items ( name ), purchase_orders ( po_number, shopkeepers ( name ) ) )",
         )
         .eq("orders.site_id", siteId),
       supabase
@@ -166,13 +169,19 @@ export async function loadInventory(
   }
   for (const list of receiptsByLine.values()) list.sort((a, b) => a.loggedAt - b.loggedAt);
 
-  type Draft = { key: string; itemName: string; unit: string; events: Omit<Movement, "balance">[] };
+  type Draft = {
+    key: string;
+    itemName: string;
+    unit: string;
+    description: { text: string; at: string } | null;
+    events: Omit<Movement, "balance">[];
+  };
   const byKey = new Map<string, Draft>();
   const draft = (itemId: string, itemName: string, unit: string) => {
     const key = `${itemId}|${unit}`;
     let d = byKey.get(key);
     if (!d) {
-      d = { key, itemName, unit, events: [] };
+      d = { key, itemName, unit, description: null, events: [] };
       byKey.set(key, d);
     }
     return d;
@@ -220,6 +229,10 @@ export async function loadInventory(
         remarks: a.remarks,
       };
       const target = draft(line.item_id, one(line.items)?.name ?? "Unknown item", line.unit);
+      const description = line.description?.trim();
+      if (description && (!target.description || a.approved_date > target.description.at)) {
+        target.description = { text: description, at: a.approved_date };
+      }
 
       const coveredTotal = round(covered.reduce((n, r) => n + r.quantity, 0));
       if (covered.length > 0 && coveredTotal === round(Number(a.quantity_approved))) {
@@ -295,6 +308,7 @@ export async function loadInventory(
       key: d.key,
       itemName: d.itemName,
       unit: d.unit,
+      description: d.description?.text ?? null,
       approvedIn: round(approvedIn),
       released: round(released),
       openingBalance,

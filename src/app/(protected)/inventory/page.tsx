@@ -6,9 +6,13 @@ import { loadInventory, poMatches, type Movement } from "@/lib/inventory";
 import { InventoryFilters } from "./InventoryFilters";
 import { paginate, Pagination } from "@/components/ui/Pagination";
 
-// Phones: item + stock only; the other columns appear from `sm` up.
+// Phones: toggle + item + stock only; the other columns appear from `md` up.
 const ROW_GRID =
-  "grid grid-cols-[minmax(0,1fr)_auto] sm:grid-cols-[minmax(0,1.6fr)_0.6fr_0.9fr_0.9fr_0.9fr_1.1fr] items-center gap-3";
+  "grid grid-cols-[24px_minmax(0,1fr)_auto] md:grid-cols-[24px_minmax(0,2fr)_70px_110px_100px_110px_150px] items-center gap-3";
+
+/** Columns of an item's in/out history: date, type, qty, balance, reference, by. */
+const HISTORY_GRID =
+  "grid grid-cols-[100px_60px_90px_90px_minmax(200px,1fr)_110px] items-center gap-3";
 
 const isDay = (s: string | undefined): s is string => !!s && /^\d{4}-\d{2}-\d{2}$/.test(s);
 
@@ -41,7 +45,7 @@ function Reference({ m, unit, highlight }: { m: Movement; unit: string; highligh
     <span className="flex flex-wrap items-center gap-x-1.5 gap-y-1">
       <span
         className={`rounded-full border px-2 py-0.5 font-mono text-[11px] font-bold text-brand-navy ${
-          highlight ? "border-brand-gold bg-brand-gold-pale" : "border-brand-border bg-brand-cream"
+          highlight ? "border-brand-gold bg-brand-gold-pale" : "border-brand-border bg-white"
         }`}
       >
         {m.poNumber ?? "—"}
@@ -130,7 +134,7 @@ export default async function InventoryPage({
   ];
 
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-4">
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-extrabold text-brand-navy">Stock Inventory</h1>
@@ -147,68 +151,80 @@ export default async function InventoryPage({
         {tiles.map((t) => (
           <div
             key={t.label}
-            className="rounded-2xl border border-brand-border bg-white px-4 py-3.5 shadow-sm"
+            className="flex items-baseline gap-2.5 rounded-xl border border-brand-border bg-white px-4 py-3"
           >
-            <div
-              className={`text-2xl font-extrabold ${t.warn ? "text-[#c2410c]" : "text-brand-navy"}`}
+            <span
+              className={`text-[22px] font-extrabold ${t.warn ? "text-[#c2410c]" : "text-brand-navy"}`}
             >
               {t.value}
-            </div>
-            <div className="text-[11px] text-[#7b8494]">{t.label}</div>
+            </span>
+            <span className="text-xs text-[#6b6553]">{t.label}</span>
           </div>
         ))}
       </div>
 
-      <InventoryFilters siteId={selectedSiteId} initial={filters} />
+      {/* No overflow-hidden here: it would stop the column headers sticking. */}
+      <div className="rounded-xl border border-brand-border bg-white">
+        <InventoryFilters siteId={selectedSiteId} initial={filters} />
 
-      {lines.length === 0 ? (
-        <p className="rounded-2xl border border-dashed border-brand-border bg-white p-8 text-center text-[#7b8494]">
-          {filters.q
-            ? `No stock matches "${filters.q}".`
-            : hasRange
-              ? "No stock movements in this period."
-              : "No approved stock at this site yet — items appear here once HO3 approves a delivery."}
-        </p>
-      ) : (
-        <div className="overflow-hidden rounded-2xl border border-brand-border bg-white shadow-sm">
-          <div
-            className={`${ROW_GRID} hidden border-b border-brand-border bg-brand-cream px-5 py-3 text-[10.5px] font-bold uppercase tracking-wider text-[#8a836f] sm:grid`}
-          >
-            <div>Item</div>
-            <div>Unit</div>
-            <div className="text-right">Approved in</div>
-            <div className="text-right">Released</div>
-            <div className="text-right">In stock</div>
-            <div>Last movement</div>
-          </div>
+        {lines.length === 0 ? (
+          <p className="p-8 text-center text-[#7b8494]">
+            {filters.q
+              ? `No stock matches "${filters.q}".`
+              : hasRange
+                ? "No stock movements in this period."
+                : "No approved stock at this site yet — items appear here once HO3 approves a delivery."}
+          </p>
+        ) : (
+          <>
+            {/* Column names stay visible while scrolling the list. */}
+            <div
+              className={`${ROW_GRID} sticky top-0 z-[3] border-b border-brand-border bg-brand-cream px-[22px] py-[9px] text-[10.5px] font-bold uppercase tracking-[0.09em] text-[#8a836f] shadow-[0_4px_8px_-6px_rgba(15,26,51,0.2)]`}
+            >
+              <span />
+              <span>Item</span>
+              <span className="hidden md:block">Unit</span>
+              <span className="hidden text-right md:block">Approved in</span>
+              <span className="hidden text-right md:block">Released</span>
+              <span className="text-right">In stock</span>
+              <span className="hidden md:block">Last movement</span>
+            </div>
 
-          <div className="divide-y divide-brand-border-soft">
             {linesPage.pageRows.map((line) => (
-              <details key={line.key} className="group">
+              <details
+                key={line.key}
+                className="group mx-2 mt-2 rounded-[10px] border border-brand-border bg-white shadow-[0_1px_0_rgba(15,26,51,0.04)]"
+              >
                 <summary
-                  className={`${ROW_GRID} cursor-pointer list-none px-5 py-3.5 hover:bg-[#fbfaf6] [&::-webkit-details-marker]:hidden`}
+                  className={`${ROW_GRID} cursor-pointer list-none rounded-[10px] px-3.5 py-3 text-[13px] hover:bg-brand-cream group-open:rounded-b-none group-open:bg-brand-cream [&::-webkit-details-marker]:hidden`}
                 >
-                  <div className="flex min-w-0 items-center gap-2">
-                    <span className="text-[#8a836f] transition-transform group-open:rotate-90">▸</span>
-                    <span className="min-w-0">
-                      <span className="block break-words text-sm font-bold text-brand-navy">
-                        {line.itemName}
+                  <span
+                    aria-hidden
+                    className="flex h-[22px] w-[22px] items-center justify-center rounded-md border border-brand-border text-[10px] text-brand-navy"
+                  >
+                    <span className="group-open:hidden">▼</span>
+                    <span className="hidden group-open:inline">▲</span>
+                  </span>
+                  <span className="flex min-w-0 flex-col gap-0.5">
+                    <span className="break-words font-bold text-brand-navy">{line.itemName}</span>
+                    {line.description && (
+                      <span className="break-words text-[11.5px] leading-snug text-[#6b6553]">
+                        {line.description}
                       </span>
-                      <span className="block text-[11px] text-[#7b8494] sm:hidden">
-                        {line.unit} · in {formatQty(line.approvedIn)} · out{" "}
-                        {formatQty(line.released)}
-                      </span>
+                    )}
+                    <span className="text-[11px] text-[#7b8494] md:hidden">
+                      {line.unit} · in {formatQty(line.approvedIn)} · out {formatQty(line.released)}
                     </span>
-                  </div>
-                  <div className="hidden text-xs text-[#6b7280] sm:block">{line.unit}</div>
-                  <div className="hidden text-right text-sm text-[#4b5563] sm:block">
+                  </span>
+                  <span className="hidden text-[#6b6553] md:block">{line.unit}</span>
+                  <span className="hidden text-right text-[#374151] md:block">
                     {formatQty(line.approvedIn)}
-                  </div>
-                  <div className="hidden text-right text-sm text-[#4b5563] sm:block">
+                  </span>
+                  <span className="hidden text-right text-[#374151] md:block">
                     {formatQty(line.released)}
-                  </div>
-                  <div
-                    className={`text-right text-sm font-extrabold ${
+                  </span>
+                  <span
+                    className={`text-right font-extrabold ${
                       line.inStock < 0
                         ? "text-red-700"
                         : line.inStock === 0
@@ -220,98 +236,88 @@ export default async function InventoryPage({
                     {line.inStock < 0 && (
                       <span className="block text-[10px] font-bold">released before approval</span>
                     )}
-                  </div>
-                  <div className="hidden text-xs text-[#6b7280] sm:block">
+                  </span>
+                  <span className="hidden text-xs text-[#6b6553] md:block">
                     {line.lastMovement
                       ? `${formatDate(line.lastMovement.date)} · ${line.lastMovement.type === "in" ? "IN" : "OUT"}`
                       : "—"}
-                  </div>
+                  </span>
                 </summary>
 
-                <div className="overflow-x-auto border-t border-brand-border-soft bg-[#fbfaf6] px-5 py-3">
-                  <table className="w-full min-w-[640px] text-left text-xs text-[#4b5563]">
-                    <thead className="text-[10px] font-bold uppercase tracking-wider text-[#8a836f]">
-                      <tr>
-                        <th className="py-1.5 pr-3 font-bold">Date</th>
-                        <th className="py-1.5 pr-3 font-bold">Type</th>
-                        <th className="py-1.5 pr-3 text-right font-bold">Qty</th>
-                        <th className="py-1.5 pr-3 text-right font-bold">Balance</th>
-                        <th className="py-1.5 pr-3 font-bold">Reference</th>
-                        <th className="py-1.5 font-bold">By</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-brand-border-soft">
-                      {filters.from && (
-                        <tr className="text-[#7b8494]">
-                          <td className="py-2 pr-3">{formatDay(filters.from)}</td>
-                          <td className="py-2 pr-3" colSpan={2}>
-                            Opening balance
-                          </td>
-                          <td className="py-2 pr-3 text-right font-bold">
-                            {formatQty(line.openingBalance)}
-                          </td>
-                          <td colSpan={2} />
-                        </tr>
-                      )}
-                      {line.movements.map((m) => (
-                        <tr key={`${m.type}-${m.id}`}>
-                          <td className="whitespace-nowrap py-2 pr-3">{formatDate(m.date)}</td>
-                          <td className="py-2 pr-3">
-                            <span
-                              className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${
-                                m.type === "in"
-                                  ? "bg-[rgba(34,197,94,.15)] text-[#166534]"
-                                  : "bg-[rgba(249,115,22,.15)] text-[#9a3412]"
-                              }`}
-                            >
-                              {m.type === "in" ? "IN" : "OUT"}
-                            </span>
-                          </td>
-                          <td
-                            className={`whitespace-nowrap py-2 pr-3 text-right font-bold ${
-                              m.type === "in" ? "text-[#166534]" : "text-[#9a3412]"
+                <div className="overflow-x-auto rounded-b-[10px] border-t border-brand-border-soft bg-brand-cream px-3.5 pb-2 pt-1 md:pl-[50px]">
+                  <div className="min-w-[720px]">
+                    <div
+                      className={`${HISTORY_GRID} border-b border-[#e6dfd1] py-[7px] text-[10px] font-bold uppercase tracking-[0.09em] text-[#8a836f]`}
+                    >
+                      <span>Date</span>
+                      <span>Type</span>
+                      <span className="text-right">Qty</span>
+                      <span className="text-right">Balance</span>
+                      <span>Reference</span>
+                      <span>By</span>
+                    </div>
+                    {filters.from && (
+                      <div className={`${HISTORY_GRID} py-[7px] text-[12.5px] text-[#7b8494]`}>
+                        <span>{formatDay(filters.from)}</span>
+                        <span className="col-span-2">Opening balance</span>
+                        <span className="text-right font-bold">{formatQty(line.openingBalance)}</span>
+                      </div>
+                    )}
+                    {line.movements.map((m) => (
+                      <div key={`${m.type}-${m.id}`} className={`${HISTORY_GRID} py-[7px] text-[12.5px]`}>
+                        <span className="whitespace-nowrap text-[#374151]">{formatDate(m.date)}</span>
+                        <span>
+                          <span
+                            className={`rounded-full border px-2 py-px text-[10.5px] font-bold ${
+                              m.type === "in"
+                                ? "border-[#b7e2c4] bg-[#e7f6ec] text-[#166534]"
+                                : "border-[#fed7aa] bg-[#fff1e6] text-[#9a3412]"
                             }`}
                           >
-                            {m.quantity === 0
-                              ? "—"
-                              : `${m.quantity > 0 ? "+" : "−"}${formatQty(Math.abs(m.quantity))}`}
-                          </td>
-                          <td
-                            className={`py-2 pr-3 text-right font-bold ${m.balance < 0 ? "text-red-700" : "text-brand-navy"}`}
-                          >
-                            {formatQty(m.balance)}
-                          </td>
-                          <td className="py-2 pr-3">
-                            <Reference
-                              m={m}
-                              unit={line.unit}
-                              highlight={poMatches(filters.q, m.poNumber)}
-                            />
-                          </td>
-                          <td className="whitespace-nowrap py-2">{m.by}</td>
-                        </tr>
-                      ))}
-                      {line.movements.length === 0 && (
-                        <tr>
-                          <td colSpan={6} className="py-2 text-[#7b8494]">
-                            No movements in this period.
-                          </td>
-                        </tr>
-                      )}
-                    </tbody>
-                  </table>
+                            {m.type === "in" ? "IN" : "OUT"}
+                          </span>
+                        </span>
+                        <span
+                          className={`whitespace-nowrap text-right font-bold ${
+                            m.type === "in" ? "text-[#15803d]" : "text-[#9a3412]"
+                          }`}
+                        >
+                          {m.quantity === 0
+                            ? "—"
+                            : `${m.quantity > 0 ? "+" : "−"}${formatQty(Math.abs(m.quantity))}`}
+                        </span>
+                        <span
+                          className={`text-right font-bold ${m.balance < 0 ? "text-red-700" : "text-brand-navy"}`}
+                        >
+                          {formatQty(m.balance)}
+                        </span>
+                        <span className="min-w-0 text-[#374151]">
+                          <Reference
+                            m={m}
+                            unit={line.unit}
+                            highlight={poMatches(filters.q, m.poNumber)}
+                          />
+                        </span>
+                        <span className="text-[#374151]">{m.by}</span>
+                      </div>
+                    ))}
+                    {line.movements.length === 0 && (
+                      <p className="py-2 text-[12.5px] text-[#7b8494]">No movements in this period.</p>
+                    )}
+                  </div>
                 </div>
               </details>
             ))}
-          </div>
-          <Pagination
-            href={`/inventory?${listParams.toString()}`}
-            page={linesPage.page}
-            total={linesPage.total}
-            className="border-t border-brand-border"
-          />
-        </div>
-      )}
+
+            <div className="mt-2 rounded-b-xl border-t border-brand-border-soft bg-brand-cream">
+              <Pagination href={`/inventory?${listParams.toString()}`} page={linesPage.page} total={linesPage.total} />
+              <p className="px-3.5 py-2.5 text-xs text-[#6b6553]">
+                Click an item to see its in/out history. Column headers stay visible while you scroll.
+              </p>
+            </div>
+          </>
+        )}
+      </div>
     </div>
   );
 }
