@@ -192,6 +192,10 @@ export default async function ReceivingPage({
   // full round trip to the database.
   // Direct receipts (MISC- POs) aren't received against here — they're
   // already received when logged — so only real POs ('po') are listed.
+  // Only the open tab's data is loaded; the other tab gets just a count
+  // for its badge.
+  const onOpen = tab === "open";
+  const skip = Promise.resolve({ data: null, count: null });
   const [
     { data: ordersData },
     { data: logsData },
@@ -200,16 +204,18 @@ export default async function ReceivingPage({
     { data: itemsData },
     { data: shopkeepersData },
     { data: approvalsData },
+    { count: openPoCount },
+    { count: directLineCount },
   ] = await Promise.all([
     // Lines oldest-first, so they list in the order entered on the PO.
-    supabase
+    !onOpen ? skip : supabase
       .from("orders")
       .select("id, purchase_order_id, quantity_ordered, unit, description, status, items ( name ), purchase_orders!inner ( kind )")
       .eq("site_id", selectedSiteId)
       .eq("purchase_orders.kind", "po")
       .in("status", OPEN_STATUSES)
       .order("created_at"),
-    supabase
+    !onOpen ? skip : supabase
       .from("receiving_logs")
       .select(
         "id, order_id, quantity_received, condition_notes, invoice_number, received_date, received_by, created_at, profiles ( full_name ), receiving_edit_log ( id, edited_at, note, previous_values, profiles ( full_name ) ), orders!inner ( site_id, status )",
@@ -217,7 +223,7 @@ export default async function ReceivingPage({
       .eq("orders.site_id", selectedSiteId)
       .in("orders.status", OPEN_STATUSES)
       .order("received_date", { ascending: false }),
-    supabase
+    !onOpen ? skip : supabase
       .from("purchase_orders")
       .select("id, po_number, placed_date, shopkeepers ( name ), profiles ( full_name ), orders!inner ( status )")
       .eq("site_id", selectedSiteId)
@@ -226,7 +232,7 @@ export default async function ReceivingPage({
       .order("placed_date", { ascending: false }),
     // Every direct receipt, so search and the page count cover all of
     // them — fetched in batches since the API returns at most 1000 rows.
-    (async () => {
+    onOpen ? skip : (async () => {
       const BATCH = 1000;
       const all: unknown[] = [];
       for (let from = 0; ; from += BATCH) {
@@ -246,19 +252,32 @@ export default async function ReceivingPage({
       }
       return { data: all };
     })(),
-    canReceiveHere
+    // Only the Direct receipt form needs these.
+    canReceiveHere && !onOpen && newParam
       ? supabase.from("items").select("id, name, unit").order("name")
-      : Promise.resolve({ data: [] }),
-    canReceiveHere
+      : skip,
+    canReceiveHere && !onOpen && newParam
       ? supabase.from("shopkeepers").select("id, name").order("name")
-      : Promise.resolve({ data: [] }),
+      : skip,
     // When each open line was last approved — a delivery logged before
     // that is covered by the approval and can no longer be edited.
-    supabase
+    !onOpen ? skip : supabase
       .from("approvals")
       .select("order_id, created_at, orders!inner ( site_id, status )")
       .eq("orders.site_id", selectedSiteId)
       .in("orders.status", OPEN_STATUSES),
+    // Badge counts for the tab that isn't open.
+    onOpen ? skip : supabase
+      .from("purchase_orders")
+      .select("id, orders!inner ( status )", { count: "exact", head: true })
+      .eq("site_id", selectedSiteId)
+      .eq("kind", "po")
+      .in("orders.status", OPEN_STATUSES),
+    !onOpen ? skip : supabase
+      .from("orders")
+      .select("id, purchase_orders!inner ( kind )", { count: "exact", head: true })
+      .eq("site_id", selectedSiteId)
+      .eq("purchase_orders.kind", "direct"),
   ]);
 
   const lastApprovalByOrder = new Map<string, string>();
@@ -343,8 +362,18 @@ export default async function ReceivingPage({
   const directPage = paginate(visibleDirectRows, pageParam);
 
   const tabs = [
-    { key: "open", label: "Open orders", count: purchaseOrders.length, href: base },
-    { key: "direct", label: "Direct receipts", count: directRows.length, href: directHref },
+    {
+      key: "open",
+      label: "Open orders",
+      count: onOpen ? purchaseOrders.length : (openPoCount ?? 0),
+      href: base,
+    },
+    {
+      key: "direct",
+      label: "Direct receipts",
+      count: onOpen ? (directLineCount ?? 0) : directRows.length,
+      href: directHref,
+    },
   ];
 
   function renderItem(order: OpenOrderRow, orderDate: string) {
